@@ -49,6 +49,8 @@ def main(config_file):
     filename = ''.join(filepath.split('/')[-1:])
     files.append(filename)
 
+  # unique list
+  urls = list(set(urls))
   for uri in urls:
     url = config['base_url'] + uri
     dest_file, file_size = get_remote_stat(url)
@@ -69,7 +71,8 @@ def main(config_file):
     dest_path = path.join(fq_path, dest_file)
     download(url, dest_path)
     decompress(dest_path)
-    log.success("Done %s" % dest_file)
+    log.info("Done %s" % dest_file)
+  exit(0)
 
 
 def get_remote_stat(url):
