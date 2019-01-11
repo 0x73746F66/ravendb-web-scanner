@@ -31,7 +31,7 @@ def main(config_file):
     exit(1)
 
   # Get all the files that need to be downloaded using CZDAP API.
-  r = session.get(config['base_url'] + '/user-zone-data-urls.json?token=' + config['token'])
+  r = session.get(config['base_url'] + '/en/user-zone-data-urls.json?token=' + config['token'])
   if r.status_code != 200:
     log.critical("Unexpected response from CZDAP. Are you sure your token and base_url are correct in %s?" % config_file)
     exit(1)
