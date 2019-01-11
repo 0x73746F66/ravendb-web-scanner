@@ -110,6 +110,8 @@ venv.bak/
 **/zdap.private.key
 czdap.private.key
 config.json
+credentials.json
+credentials.csv
 
 # others
 vendor/
