@@ -1,0 +1,41 @@
+charset: utf8
+table: '`scans`.`tld`'
+field:
+  id:
+    pk: True
+    type: int
+  name:
+    type: string
+    max_len: 255
+    nullable: False
+  created:
+    type: datetime
+    default: UTC_TIMESTAMP
+  updated:
+    type: datetime
+    default: UTC_TIMESTAMP
+  local_file:
+    type: string
+    max_len: 255
+    nullable: False
+  czdap_id:
+    type: int
+    defaule: None
+    nullable: True
+  last_scan:
+    type: datetime
+    default: UTC_TIMESTAMP
+schema: >
+  CREATE TABLE `tld` (
+    `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `name` varchar(45) NOT NULL,
+    `created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `local_file` varchar(255) DEFAULT NULL,
+    `czdap_id` int(10) unsigned DEFAULT NULL,
+    `last_scan` datetime DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `tld_UNIQUE` (`name`),
+    UNIQUE KEY `file_UNIQUE` (`local_file`),
+    UNIQUE KEY `czdap_id_UNIQUE` (`czdap_id`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

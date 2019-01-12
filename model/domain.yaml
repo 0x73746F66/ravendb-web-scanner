@@ -1,0 +1,37 @@
+charset: utf8
+table: '`scans`.`domain`'
+field:
+  id: 
+    pk: True
+    type: int
+  name:
+    type: string
+    max_len: 255
+    nullable: False
+  created:
+    type: datetime
+    default: UTC_TIMESTAMP
+  updated:
+    type: datetime
+    default: UTC_TIMESTAMP
+  tld_id:
+    type: int
+    nullable: False
+    fk:
+      table: tld
+      field: id
+schema: >
+  CREATE TABLE `domain` (
+    `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `name` varchar(255) NOT NULL,
+    `created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `tld_id` int(10) unsigned NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `tld_UNIQUE` (`name`),
+    UNIQUE KEY `tld_id_UNIQUE` (`tld_id`),
+    CONSTRAINT `fk_domain_1` FOREIGN KEY (`tld_id`) 
+      REFERENCES `tld` (`id`) 
+      ON DELETE NO ACTION 
+      ON UPDATE NO ACTION
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

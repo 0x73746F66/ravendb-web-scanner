@@ -1,10 +1,82 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-
-import logging, gzip, shutil, requests, sys, json, colorlog, argparse
+import logging, gzip, shutil, requests, sys, json, colorlog, argparse, mysql.connector
 from os import path, getcwd, makedirs, isatty
 from glob import glob
 from urlparse import urlparse
+from mysql.connector import errorcode
+from yaml import load, dump
+
+
+config = None
+
+def sanitize(filter):
+  return filter
+
+
+def get_from_model(table_name, key, default=None):
+  model_file = path.join(path.realpath(getcwd()), 'model', '%s.yaml' % table_name)
+  with open(model_file, 'r') as f:
+    schema = load(f.read())
+
+  return schema.get(key, default)
+
+
+def sql(query):
+  log = logging.getLogger()
+  c = get_config()
+  rows = None
+  try:
+    cnx = mysql.connector.connect(
+      user=c['mysql'].get('user'),
+      password=c['mysql'].get('passwd', ''),
+      host=c['mysql'].get('host', 'localhost'),
+      port=c['mysql'].get('port', 3306),
+      database=c['mysql'].get('db')
+    )
+    cursor = cnx.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+  except mysql.connector.Error as err:
+    if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+      log.critical("Something is wrong with your user name or password")
+      exit(1)
+    elif err.errno == errorcode.ER_BAD_DB_ERROR:
+      log.critical("Database does not exist")
+      exit(1)
+    else:
+      log.critical(err)
+      exit(1)
+
+  if cnx:
+    cnx.close()
+
+  return rows
+
+
+def select_from(table, filter=None):
+  f = get_from_model(table, 'field')
+  field_names = '`'+'`,`'.join([i for i in f])+'`'
+  query = ("SELECT {fields} FROM {table} {where}".format(
+    fields=field_names,
+    table=get_from_model(table, 'table', table),
+    where='' if not filter else 'WHERE %s' % sanitize(filter)
+  ))
+
+  return sql(query)
+
+def get_config(config_file=None):
+  global config
+
+  if not config:
+    if not config_file:
+      config_file = path.join(path.realpath(getcwd()), 'config.yaml')
+    with open(config_file, 'r') as f:
+      config = load(f.read())
+
+  return config
+
 
 session = requests.Session()
 
@@ -144,7 +216,7 @@ def setup_logging(log_level):
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='open net scans')
-  parser.add_argument('-c', '--config_file', default='config.json', help='absolute path to config file')
+  parser.add_argument('-c', '--config_file', default='config.yaml', help='absolute path to config file')
   parser.add_argument('-v', action='store_true')
   parser.add_argument('-vv', action='store_true')
   parser.add_argument('-vvv', action='store_true')
@@ -164,4 +236,5 @@ if __name__ == '__main__':
     log_level = 5
 
   setup_logging(log_level)
-  main(config_file=args.config_file)
+  # main(config_file=args.config_file)
+  print(select_from('scan_log'))

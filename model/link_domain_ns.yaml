@@ -1,0 +1,30 @@
+charset: utf8
+table: '`scans`.`link_domain_ns`'
+field:
+  domain_id:
+    type: int
+    nullable: False
+    fk:
+      table: domain
+      field: id
+  ns_id:
+    type: int
+    nullable: False
+    fk:
+      table: nameservers
+      field: id
+schema: >
+  CREATE TABLE `link_domain_ns` (
+    `domain_id` int(10) unsigned NOT NULL,
+    `ns_id` int(10) unsigned NOT NULL,
+    KEY `pk` (`domain_id`,`ns_id`),
+    KEY `fk_link_domain_ns_ns_idx` (`ns_id`),
+    CONSTRAINT `fk_link_domain_ns_domain` FOREIGN KEY (`domain_id`) 
+      REFERENCES `domain` (`id`) 
+      ON DELETE NO ACTION 
+      ON UPDATE NO ACTION,
+    CONSTRAINT `fk_link_domain_ns_ns` FOREIGN KEY (`ns_id`) 
+      REFERENCES `nameservers` (`id`) 
+      ON DELETE NO ACTION 
+      ON UPDATE NO ACTION
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

@@ -1,0 +1,20 @@
+charset: utf8
+field:
+  id: 
+    pk: True
+    type: int
+  nameserver:
+    type: string
+    max_len: 255
+    nullable: False
+  ttl:
+    type: int
+    nullable: False
+schema: >
+  CREATE TABLE `nameservers` (
+    `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `nameserver` varchar(255) NOT NULL,
+    `ttl` int(10) unsigned NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `nameserver_UNIQUE` (`nameserver`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
