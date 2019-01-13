@@ -28,8 +28,7 @@ schema: >
     `updated` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `tld_id` int(10) unsigned NOT NULL,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `tld_UNIQUE` (`name`),
-    UNIQUE KEY `tld_id_UNIQUE` (`tld_id`),
+    UNIQUE KEY `domain_UNIQUE` (`name`),
     CONSTRAINT `fk_domain_1` FOREIGN KEY (`tld_id`) 
       REFERENCES `tld` (`id`) 
       ON DELETE NO ACTION 

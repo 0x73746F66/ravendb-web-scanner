@@ -1,10 +1,18 @@
 charset: utf8
 table: '`scans`.`scan_log`'
 field:
-  id: 
+  id:
     pk: True
     type: int
   domain:
+    type: str
+    max_len: 255
+    nullable: False
+  tld:
+    type: str
+    max_len: 45
+    nullable: False
+  fqdn:
     type: str
     max_len: 255
     nullable: False
@@ -30,6 +38,8 @@ schema: >
   CREATE TABLE `scan_log` (
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
     `domain` varchar(255) DEFAULT NULL,
+    `tld` varchar(45) DEFAULT NULL,
+    `fqdn` varchar(255) DEFAULT NULL,
     `local_file` varchar(255) DEFAULT NULL,
     `czdap_id` int(10) unsigned DEFAULT NULL,
     `nameserver` varchar(255) NOT NULL,

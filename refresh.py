@@ -153,7 +153,7 @@ session = requests.Session()
 def main(config_file):
   global session
   c = get_config()
-  regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s(\d+)\sin\sns\s([a-zA-Z0-9-\.]+).$"
+  regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
   log = logging.getLogger()
   base_dir = 'zonefiles'
   if not path.exists(base_dir):
@@ -215,6 +215,9 @@ def main(config_file):
       o = {}
       log.debug(line)
       matches = re.finditer(regex, line, re.MULTILINE)
+      # num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
+      # if num == 0:
+      #   print('%s' % line)
       fqdn = None
       for match in matches:
         domain = match.group(1)
@@ -232,7 +235,9 @@ def main(config_file):
       if fqdn:
         for ns in o['ns']:
           log_inserts.append({
-            'domain': fqdn,
+            'domain': domain,
+            'tld': tld,
+            'fqdn': fqdn,
             'local_file': dest_file,
             'czdap_id': czdap_id,
             'nameserver': ns['ns'],
@@ -240,10 +245,12 @@ def main(config_file):
           })
     # commit per file
     if log_inserts:
-      n = 10
+      log.info('%d array items' % len(log_inserts))
+      n = 1000
       final = [log_inserts[i * n:(i + 1) * n] for i in range((len(log_inserts) + n - 1) // n )]  
       for upserts in final:
         upsert_into('scan_log', upserts)
+    # upsert_into('scan_log', log_inserts)
   exit(0)
 
 

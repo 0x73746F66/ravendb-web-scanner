@@ -32,6 +32,5 @@ schema: >
     `czdap_id` int(10) unsigned DEFAULT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `tld_UNIQUE` (`name`),
-    UNIQUE KEY `file_UNIQUE` (`local_file`),
-    UNIQUE KEY `czdap_id_UNIQUE` (`czdap_id`)
+    UNIQUE KEY `file_UNIQUE` (`local_file`)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
