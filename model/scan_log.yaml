@@ -14,7 +14,7 @@ field:
     nullable: False
   czdap_id:
     type: int
-    default: None
+    default: null
     nullable: True
   nameserver:
     type: str

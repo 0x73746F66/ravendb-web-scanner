@@ -5,22 +5,19 @@ field:
     pk: True
     type: int
   name:
-    type: string
+    type: str
     max_len: 255
     nullable: False
   created:
     type: datetime
     default: UTC_TIMESTAMP
-  updated:
-    type: datetime
-    default: UTC_TIMESTAMP
   local_file:
-    type: string
+    type: str
     max_len: 255
     nullable: False
   czdap_id:
     type: int
-    defaule: None
+    default: null
     nullable: True
   last_scan:
     type: datetime
@@ -30,10 +27,9 @@ schema: >
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
     `name` varchar(45) NOT NULL,
     `created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `last_scan` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `local_file` varchar(255) DEFAULT NULL,
     `czdap_id` int(10) unsigned DEFAULT NULL,
-    `last_scan` datetime DEFAULT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `tld_UNIQUE` (`name`),
     UNIQUE KEY `file_UNIQUE` (`local_file`),

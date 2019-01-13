@@ -29,9 +29,9 @@ Downloading zone data from CZDAP
 
 1. Visit CZDAP and copy your token. You can find it on your user profile page.
 
-2. Make a copy of the `config.sample.json` file and name it `config.json`.
+2. Make a copy of the `config.sample.yaml` file and name it `config.yaml`.
 
-3. Edit config.json and overwrite the "token" parameter with the your unique token.
+3. Edit config.yaml and overwrite the "token" parameter with the your unique token.
 
 4. Run `python download.py`
 
@@ -42,9 +42,9 @@ To decrypt your own FTP credentials:
 
 1. Visit CZDAP and copy your token. You can find it on your user profile page, under the tab "API".
 
-2. Make a copy of the `config.sample.json` file and name it `config.json`.
+2. Make a copy of the `config.sample.yaml` file and name it `config.yaml`.
 
-3. Edit config.json and overwrite the "token" parameter with the your unique token.
+3. Edit config.yaml and overwrite the "token" parameter with the your unique token.
 
 2. Copy your private key into this directory and make sure it's named `czdap.private.key`.
 

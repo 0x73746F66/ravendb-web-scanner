@@ -4,7 +4,7 @@ field:
     pk: True
     type: int
   nameserver:
-    type: string
+    type: str
     max_len: 255
     nullable: False
   ttl:

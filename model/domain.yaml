@@ -5,7 +5,7 @@ field:
     pk: True
     type: int
   name:
-    type: string
+    type: str
     max_len: 255
     nullable: False
   created:

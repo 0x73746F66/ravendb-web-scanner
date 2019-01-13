@@ -109,7 +109,7 @@ venv.bak/
 # sensitive
 **/zdap.private.key
 czdap.private.key
-config.json
+config.yaml
 credentials.json
 credentials.csv
 

@@ -1,0 +1,7 @@
+mysql:
+  user: root
+  db: scans
+
+czdap:
+  base_url: https://czdap.icann.org
+  token: djbzklbvzklbkdvbzkdbkvbzkfvbzkvbzkjbjksdvb
