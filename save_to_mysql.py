@@ -11,8 +11,12 @@ from bitmath import Byte
 
 
 config = None
+session = None
 
 def sanitize(filter):
+  """ TODO
+  SQLi protection
+  """
   return filter
 
 
@@ -155,11 +159,85 @@ def get_config(config_file=None):
   return config
 
 
-session = requests.Session()
-
-
-def main(config_file):
+def get_session():
   global session
+
+  if not session:
+    session = requests.Session()
+
+  return session
+
+
+def get_remote_stat(url):
+  session = get_session()
+  log = logging.getLogger()
+
+  r = session.head(url)
+  if r.status_code != 200:
+    log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+    return None, None
+  dest_file = r.headers['Content-disposition'].replace('attachment; filename=', '').replace('"', '', 2)
+  file_size = int(r.headers['Content-Length'])
+
+  return dest_file, file_size
+
+
+def download(url, dest_path):
+  session = get_session()
+  log = logging.getLogger()
+  r = session.get(url, stream=True)
+  r.raw.decode_content = True
+  if r.status_code != 200:
+    log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+    return
+
+  with open(dest_path, 'wb') as f:
+    shutil.copyfileobj(r.raw, f)
+
+  return dest_path
+
+
+def decompress(file_path):
+  new_dest = file_path.replace('.gz', '', 1)
+  with gzip.open(file_path, 'rb') as f_in:
+    with open(new_dest, 'wb') as f_out:
+      shutil.copyfileobj(f_in, f_out)
+  return new_dest
+
+
+def setup_logging(log_level):
+  log = logging.getLogger()
+  format_str = '%(asctime)s - %(levelname)-8s - %(message)s'
+  date_format = '%Y-%m-%d %H:%M:%S'
+  if isatty(2):
+    cformat = '%(log_color)s' + format_str
+    colors = {'DEBUG': 'reset',
+              'INFO': 'bold_blue',
+              'WARNING': 'bold_yellow',
+              'ERROR': 'bold_red',
+              'CRITICAL': 'bold_red'}
+    formatter = colorlog.ColoredFormatter(cformat, date_format, log_colors=colors)
+  else:
+    formatter = logging.Formatter(format_str, date_format)
+
+  if log_level > 0:
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    log.addHandler(stream_handler)
+  if log_level == 1:
+    log.setLevel(logging.CRITICAL)
+  if log_level == 2:
+    log.setLevel(logging.ERROR)
+  if log_level == 3:
+    log.setLevel(logging.WARN)
+  if log_level == 4:
+    log.setLevel(logging.INFO)
+  if log_level >= 5:
+    log.setLevel(logging.DEBUG)
+
+
+def save_to_mysql(config_file):
+  session = get_session()
   c = get_config(config_file=config_file)
   regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
   log = logging.getLogger()
@@ -270,75 +348,6 @@ def main(config_file):
   exit(0)
 
 
-def get_remote_stat(url):
-  global session
-  log = logging.getLogger()
-
-  r = session.head(url)
-  if r.status_code != 200:
-    log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
-    return None, None
-  dest_file = r.headers['Content-disposition'].replace('attachment; filename=', '').replace('"', '', 2)
-  file_size = int(r.headers['Content-Length'])
-
-  return dest_file, file_size
-
-
-def download(url, dest_path):
-  global session
-  log = logging.getLogger()
-  r = session.get(url)
-  if r.status_code != 200:
-    log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
-    return
-
-  log.info("saving as %s" % dest_path)
-  with open(dest_path, 'wb') as f:
-    for chunk in r.iter_content(1024):
-      f.write(chunk)
-  return True
-
-
-def decompress(file_path):
-  log = logging.getLogger()
-  with gzip.open(file_path, 'rb') as f_in:
-    new_dest = file_path.replace('.gz', '', 1)
-    log.info("decompressing as %s" % new_dest)
-    with open(new_dest, 'wb') as f_out:
-      shutil.copyfileobj(f_in, f_out)
-  return new_dest
-
-
-def setup_logging(log_level):
-  log = logging.getLogger()
-  format_str = '%(asctime)s - %(levelname)-8s - %(message)s'
-  date_format = '%Y-%m-%d %H:%M:%S'
-  if isatty(2):
-    cformat = '%(log_color)s' + format_str
-    colors = {'DEBUG': 'reset',
-              'INFO': 'bold_blue',
-              'WARNING': 'bold_yellow',
-              'ERROR': 'bold_red',
-              'CRITICAL': 'bold_red'}
-    formatter = colorlog.ColoredFormatter(cformat, date_format, log_colors=colors)
-  else:
-    formatter = logging.Formatter(format_str, date_format)
-
-  if log_level > 0:
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    log.addHandler(stream_handler)
-  if log_level == 1:
-    log.setLevel(logging.CRITICAL)
-  if log_level == 2:
-    log.setLevel(logging.ERROR)
-  if log_level == 3:
-    log.setLevel(logging.WARN)
-  if log_level == 4:
-    log.setLevel(logging.INFO)
-  if log_level >= 5:
-    log.setLevel(logging.DEBUG)
-
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='open net scans')
   parser.add_argument('-c', '--config_file', default='config.yaml', help='absolute path to config file')
@@ -361,4 +370,4 @@ if __name__ == '__main__':
     log_level = 5
 
   setup_logging(log_level)
-  main(config_file=args.config_file)
+  save_to_mysql(config_file=args.config_file)
