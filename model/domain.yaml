@@ -21,7 +21,7 @@ field:
       table: tld
       field: id
 schema: >
-  CREATE TABLE `domain` (
+  CREATE TABLE IF NOT EXISTS `domain` (
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
     `name` varchar(255) NOT NULL,
     `created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,

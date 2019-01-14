@@ -29,6 +29,7 @@ def sql(query):
   rows = None
   cnx = None
   try:
+    log.debug('Creating database connection')
     cnx = mysql.connector.connect(
       user=c['mysql'].get('user'),
       password=c['mysql'].get('passwd', ''),
@@ -37,6 +38,7 @@ def sql(query):
       database=c['mysql'].get('db')
     )
     cursor = cnx.cursor()
+    log.debug('Executing query\n%s' % query)
     cursor.execute(query)
     if query.startswith('SELECT'):
       rows = cursor.fetchall()
@@ -47,6 +49,8 @@ def sql(query):
   except mysql.connector.Error as err:
     if cnx:
       cnx.rollback()
+      log.warning('Closing database connection after exception')
+      cnx.close()
     if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
       log.critical("Something is wrong with your user name or password")
       exit(1)
@@ -59,12 +63,14 @@ def sql(query):
       exit(1)
 
   if cnx:
+    log.debug('Closing database connection')
     cnx.close()
 
   return rows
 
 
 def upsert_into(table, inserts):
+  log = logging.getLogger()
   model = get_from_model(table, 'field')
   params = []
   cols = []
@@ -73,6 +79,7 @@ def upsert_into(table, inserts):
   if type(inserts) == dict:
     old = inserts
     inserts = [old]
+  log.debug('building upsert sql for %d records' % len(inserts))
   for i_values in inserts:
     i_params = {}
     val_list = []
@@ -80,7 +87,7 @@ def upsert_into(table, inserts):
     for field, schema in model.items():
       if field in [i for i in i_values]:
         if schema['type'] == 'datetime':
-          i_params[field] = datetime.strptime(i_values[field], '%Y-%m-%d %H:%M:%S')
+          i_params[field] = i_values[field].strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(i_values[field], eval(schema['type'])):
           i_params[field] = i_values[field]
         else:
@@ -97,7 +104,7 @@ def upsert_into(table, inserts):
         ))
 
     for k,v in i_params.items():
-      if model[k]['type'] == 'str':
+      if model[k]['type'] in ['str', 'datetime']:
         val_list.append("'"+v+"'")
       elif not v:
         val_list.append('NULL')
@@ -152,7 +159,7 @@ session = requests.Session()
 
 def main(config_file):
   global session
-  c = get_config()
+  c = get_config(config_file=config_file)
   regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
   log = logging.getLogger()
   base_dir = 'zonefiles'
@@ -191,33 +198,35 @@ def main(config_file):
     log_inserts = []
     url = c['czdap']['base_url'] + uri
     czdap_id = int(''.join(''.join(uri.split('?')[:-1]).split('/')[-1:]))
-    dest_file, file_size = get_remote_stat(url)
-   
-    if not dest_file:
+    remote_file, file_size = get_remote_stat(url)
+    if not remote_file:
       log.warning('Skipping %s' % uri)
       continue
 
+    dest_file_pieces = remote_file.split('-')[1:]
+    dest_file_pieces.insert(0, str(czdap_id))
+    dest_file = '-'.join(dest_file_pieces)
     if dest_file in files:
       local_file_path = path.join(fq_path, dest_file)
       local_size = path.getsize(local_file_path)
       if local_size == file_size:
-        log.info("Local file exists: %s" % dest_file)
+        log.info("Matched local file [%s] skipping download.." % dest_file)
         continue
       else:
-        log.info("Refreshing file: %s" % dest_file)
+        log.info("Local file [%s] is stale" % dest_file)
     
     dest_path = path.join(fq_path, dest_file)
     download(url, dest_path)
-    decompress(dest_path)
-    log.info("Done %s" % dest_file)
-    plaintext_file = dest_path.replace('.gz', '', 1)
+    log.info("Downloaded %s" % dest_file)
+    plaintext_file = decompress(dest_path)
+    log.info("Decompressed as %s" % plaintext_file)
     for line in open(plaintext_file, 'r').readlines():
       o = {}
       log.debug(line)
       matches = re.finditer(regex, line, re.MULTILINE)
-      # num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
-      # if num == 0:
-      #   print('%s' % line)
+      num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
+      if num == 0:
+        log.debug('No match found for line\n%s' % line)
       fqdn = None
       for match in matches:
         domain = match.group(1)
@@ -239,17 +248,21 @@ def main(config_file):
             'tld': tld,
             'fqdn': fqdn,
             'local_file': dest_file,
+            'remote_file': remote_file,
             'czdap_id': czdap_id,
             'nameserver': ns['ns'],
-            'ttl': ns['ttl']
+            'ttl': ns['ttl'],
+            'scanned': datetime.utcnow()
           })
+
     # commit per file
     if log_inserts:
-      log.info('%d array items' % len(log_inserts))
       n = 1000
+      log.info('Found %d items, splitting into %d chunks' % (len(log_inserts), n))
       final = [log_inserts[i * n:(i + 1) * n] for i in range((len(log_inserts) + n - 1) // n )]  
       for upserts in final:
         upsert_into('scan_log', upserts)
+    # log.info('Found %d items' % len(log_inserts))
     # upsert_into('scan_log', log_inserts)
   exit(0)
 
@@ -276,19 +289,21 @@ def download(url, dest_path):
     log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
     return
 
-  log.debug("saving as %s" % dest_path)
+  log.info("saving as %s" % dest_path)
   with open(dest_path, 'wb') as f:
     for chunk in r.iter_content(1024):
       f.write(chunk)
+  return True
 
 
 def decompress(file_path):
   log = logging.getLogger()
   with gzip.open(file_path, 'rb') as f_in:
     new_dest = file_path.replace('.gz', '', 1)
-    log.debug("decompressing to %s" % new_dest)
+    log.info("decompressing as %s" % new_dest)
     with open(new_dest, 'wb') as f_out:
       shutil.copyfileobj(f_in, f_out)
+  return new_dest
 
 
 def setup_logging(log_level):

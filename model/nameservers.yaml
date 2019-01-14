@@ -11,7 +11,7 @@ field:
     type: int
     nullable: False
 schema: >
-  CREATE TABLE `nameservers` (
+  CREATE TABLE IF NOT EXISTS `nameservers` (
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
     `nameserver` varchar(255) NOT NULL,
     `ttl` int(10) unsigned NOT NULL,

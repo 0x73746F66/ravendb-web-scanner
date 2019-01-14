@@ -20,6 +20,10 @@ field:
     type: str
     max_len: 255
     nullable: False
+  remote_file:
+    type: str
+    max_len: 255
+    nullable: False
   czdap_id:
     type: int
     default: null
@@ -35,15 +39,17 @@ field:
     type: datetime
     default: UTC_TIMESTAMP
 schema: >
-  CREATE TABLE `scan_log` (
+  CREATE TABLE IF NOT EXISTS `scans`.`scan_log` (
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-    `domain` varchar(255) DEFAULT NULL,
-    `tld` varchar(45) DEFAULT NULL,
-    `fqdn` varchar(255) DEFAULT NULL,
-    `local_file` varchar(255) DEFAULT NULL,
+    `domain` varchar(255) NOT NULL,
+    `tld` varchar(45) NOT NULL,
+    `fqdn` varchar(255) NOT NULL,
+    `local_file` varchar(255) NOT NULL,
+    `remote_file` varchar(255) NOT NULL,
     `czdap_id` int(10) unsigned DEFAULT NULL,
     `nameserver` varchar(255) NOT NULL,
     `ttl` int(10) unsigned NOT NULL,
     `scanned` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`)
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `scan_log_UNIQUE` (`fqdn`,`nameserver`,`ttl`,`remote_file`)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
