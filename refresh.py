@@ -7,6 +7,7 @@ from urlparse import urlparse
 from mysql.connector import errorcode
 from yaml import load, dump
 from datetime import datetime
+from bitmath import Byte
 
 
 config = None
@@ -203,6 +204,7 @@ def main(config_file):
       log.warning('Skipping %s' % uri)
       continue
 
+    human_size = Byte(file_size).best_prefix()
     dest_file_pieces = remote_file.split('-')[1:]
     dest_file_pieces.insert(0, str(czdap_id))
     dest_file = '-'.join(dest_file_pieces)
@@ -214,7 +216,8 @@ def main(config_file):
         continue
       else:
         log.info("Local file [%s] is stale" % dest_file)
-    
+
+    log.info("Downloading %s (this may take a while)" % human_size)
     dest_path = path.join(fq_path, dest_file)
     download(url, dest_path)
     log.info("Downloaded %s" % dest_file)
