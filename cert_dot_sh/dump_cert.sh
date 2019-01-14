@@ -11,5 +11,5 @@ mkdir -p $DIR
 
 psql -h $HOST -p $PORT -U $USER -Atc "select tablename from pg_tables where schemaname='$SCHEMA'" $DB |\
   while read TBL; do
-    psql -h $HOST -p $PORT -U $USER -c "COPY $SCHEMA.$TBL TO STDOUT WITH CSV" $DB > $DIR/$TBL.csv
+    psql -h $HOST -p $PORT -U $USER -c "COPY $SCHEMA.$TBL TO STDOUT DELIMITER ',' CSV HEADER" $DB > $DIR/$TBL.csv
   done
