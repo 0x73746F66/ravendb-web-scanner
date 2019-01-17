@@ -5,7 +5,7 @@ from os import path, getcwd, makedirs, isatty
 from glob import glob
 from urlparse import urljoin, urlparse
 from mysql.connector import errorcode
-from yaml import load, dump
+from yaml import load
 from datetime import datetime
 from bitmath import Byte
 
@@ -448,7 +448,7 @@ def collect_local_files(reprocess_local_file=None):
     return list(to_process)
 
   local_files = get_local_files(zonefile_dir)
-  cache_path = c['records'].get('cache_path', 'shelf.db')
+  cache_path = c['records'].get('cache_path', 'pyshelf.db')
   cache = shelve.open(cache_path)
 
   try:
