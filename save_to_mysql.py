@@ -236,26 +236,13 @@ def setup_logging(log_level):
     log.setLevel(logging.DEBUG)
 
 
-def save_to_mysql(config_file):
+def download_zonefile_list(base_url, token):
   session = get_session()
-  c = get_config(config_file=config_file)
-  regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
   log = logging.getLogger()
-  base_dir = 'zonefiles'
-  if not path.exists(base_dir):
-    makedirs(base_dir)
-
-  if 'czdap' not in c or not c['czdap'].get('token'):
-    log.critical("'token' parameter not found in the %s file" % config_file)
-    exit(1)
-  if 'czdap' not in c or not c['czdap'].get('base_url'):
-    log.critical("'base_url' parameter not found in the %s file" % config_file)
-    exit(1)
-
   # Get all the files that need to be downloaded using CZDAP API.
-  r = session.get(c['czdap']['base_url'] + '/en/user-zone-data-urls.json?token=' + c['czdap']['token'])
+  r = session.get(base_url + '/en/user-zone-data-urls.json?token=' + token)
   if r.status_code != 200:
-    log.critical("Unexpected response from CZDAP. Are you sure your token and base_url are correct in %s?" % config_file)
+    log.critical("Unexpected response from CZDAP. Are you sure your token and base_url are correct in your config_file?")
     exit(1)
   try:
     urls = json.loads(r.text)
@@ -263,111 +250,128 @@ def save_to_mysql(config_file):
     log.critical("Unable to parse JSON returned from CZDAP.")
     exit(1)
 
-  proj_root = path.realpath(getcwd())
-  fq_path = path.join(proj_root, base_dir)
-  files = []
+  return list(set(urls))
 
-  for filepath in glob('%s/*.txt.gz' % fq_path):
+def local_files(dest_dir):
+  files = []
+  for filepath in glob('%s/*.txt.gz' % dest_dir):
     filename = ''.join(filepath.split('/')[-1:])
     files.append(filename)
 
-  # unique list
-  urls = list(set(urls))
-  for uri in urls:
-    log_inserts = []
-    url = c['czdap']['base_url'] + uri
-    czdap_id = int(''.join(''.join(uri.split('?')[:-1]).split('/')[-1:]))
-    remote_file, file_size = get_remote_stat(url)
-    if not remote_file:
-      log.warning('Skipping %s' % uri)
-      continue
+  return files
 
-    human_size = Byte(file_size).best_prefix()
-    dest_file_pieces = remote_file.split('-')[1:]
-    dest_file_pieces.insert(0, str(czdap_id))
-    dest_file = '-'.join(dest_file_pieces)
-    if dest_file in files:
-      local_file_path = path.join(fq_path, dest_file)
-      local_size = path.getsize(local_file_path)
-      if local_size == file_size:
-        log.info("Matched local file [%s] skipping download.." % dest_file)
+def save_to_mysql(config_file, reprocess_local_file=None):
+  c = get_config(config_file=config_file)
+  regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
+  log = logging.getLogger()
+
+  base_dir = 'zonefiles'
+  proj_root = path.realpath(getcwd())
+  fq_path = path.join(proj_root, base_dir)
+
+  if not path.exists(base_dir):
+    makedirs(base_dir)
+
+  files = local_files(fq_path)
+
+  files_to_process = set()
+  if not reprocess_local_file:
+    if 'czdap' not in c or not c['czdap'].get('token'):
+      log.critical("'token' parameter not found in the %s file" % config_file)
+      exit(1)
+    if 'czdap' not in c or not c['czdap'].get('base_url'):
+      log.critical("'base_url' parameter not found in the %s file" % config_file)
+      exit(1)
+
+    urls = download_zonefile_list(base_url=c['czdap']['base_url'], token=c['czdap']['token'])
+
+    for uri in urls:
+      url = c['czdap']['base_url'] + uri
+      czdap_id = int(''.join(''.join(uri.split('?')[:-1]).split('/')[-1:]))
+      remote_file, file_size = get_remote_stat(url)
+      if not remote_file:
+        log.warning('Skipping %s' % uri)
         continue
-      else:
-        log.info("Local file [%s] is stale" % dest_file)
 
-    log.info("Downloading %s (this may take a while)" % human_size)
-    dest_path = path.join(fq_path, dest_file)
-    download(url, dest_path)
-    log.info("Downloaded %s" % dest_file)
-    plaintext_file = decompress(dest_path)
-    log.info("Decompressed as %s" % plaintext_file)
-    for line in open(plaintext_file, 'r').readlines():
-      o = {}
-      log.debug(line)
-      matches = re.finditer(regex, line, re.MULTILINE)
-      num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
-      if num == 0:
-        log.debug('No match found for line\n%s' % line)
-      fqdn = None
-      for match in matches:
-        domain = match.group(1)
-        tld = match.group(2)
-        if not fqdn:
-          fqdn = '.'.join([domain, tld])
+      human_size = Byte(file_size).best_prefix()
+      dest_file_pieces = remote_file.split('-')[1:]
+      dest_file_pieces.insert(0, str(czdap_id))
+      dest_file = '-'.join(dest_file_pieces)
+      if dest_file in files:
+        local_file_path = path.join(fq_path, dest_file)
+        local_size = path.getsize(local_file_path)
+        if local_size == file_size:
+          log.info("Matched local file [%s] skipping download.." % dest_file)
+          continue
+        else:
+          log.info("Local file [%s] is stale" % dest_file)
 
-        o['domain'] = domain
-        o['tld'] = tld
-        o['ns'] = []
-        o['ns'].append({
-          'ttl': match.group(3),
-          'ns': match.group(4)
+      log.info("Downloading %s (this may take a while)" % human_size)
+      dest_path = path.join(fq_path, dest_file)
+      download(url, dest_path)
+      log.info("Downloaded %s" % dest_file)
+      plaintext_file = decompress(dest_path)
+      log.info("Decompressed as %s" % plaintext_file)
+      files_to_process.add(plaintext_file)
+
+  if reprocess_local_file:
+    plaintext_file = path.join(fq_path, reprocess_local_file)
+    files_to_process.add(plaintext_file)
+
+  for plaintext_file in files_to_process:
+    if path.isfile(plaintext_file):
+      log_inserts = []
+      scanned_time = datetime.utcnow()
+      dest_file = ''.join(plaintext_file.split('/')[-1:])
+      czdap_id = int(''.join(dest_file.split('-')[:1]))
+      remote_file = c['czdap']['base_url'] + path.join(c['czdap']['zone_file_uri'], str(czdap_id))
+
+      for line in open(plaintext_file, 'r').readlines():
+        o = {}
+        log.debug(line)
+        matches = re.finditer(regex, line, re.MULTILINE)
+        num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
+        if num == 0:
+          log.debug('No match found for line\n%s' % line)
+
+        for match in matches:
+          domain = match.group(1)
+          tld = match.group(2)
+          ttl = match.group(3)
+          ns = match.group(4)
+
+        fqdn = '.'.join([domain, tld])
+        log_inserts.append({
+          'domain': domain,
+          'tld': tld,
+          'fqdn': fqdn,
+          'local_file': dest_file,
+          'remote_file': remote_file,
+          'czdap_id': czdap_id,
+          'nameserver': ns['ns'],
+          'ttl': ns['ttl'],
+          'scanned': scanned_time
         })
-      if fqdn:
-        for ns in o['ns']:
-          log_inserts.append({
-            'domain': domain,
-            'tld': tld,
-            'fqdn': fqdn,
-            'local_file': dest_file,
-            'remote_file': remote_file,
-            'czdap_id': czdap_id,
-            'nameserver': ns['ns'],
-            'ttl': ns['ttl'],
-            'scanned': datetime.utcnow()
-          })
 
-    # commit per file
-    if log_inserts:
-      n = 1000
-      log.info('Found %d items, splitting into %d chunks' % (len(log_inserts), n))
-      final = [log_inserts[i * n:(i + 1) * n] for i in range((len(log_inserts) + n - 1) // n )]  
-      for upserts in final:
-        upsert_into('scan_log', upserts)
-    # log.info('Found %d items' % len(log_inserts))
-    # upsert_into('scan_log', log_inserts)
-  exit(0)
+      # commit per file
+      if log_inserts:
+        n = 1000
+        log.info('Found %d items, splitting into %d chunks' % (len(log_inserts), n))
+        final = [log_inserts[i * n:(i + 1) * n] for i in range((len(log_inserts) + n - 1) // n )]  
+        for upserts in final:
+          upsert_into('scan_log', upserts)
+      # log.info('Found %d items' % len(log_inserts))
+      # upsert_into('scan_log', log_inserts)
+    exit(0)
 
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='open net scans')
   parser.add_argument('-c', '--config_file', default='config.yaml', help='absolute path to config file')
-  parser.add_argument('-v', action='store_true')
-  parser.add_argument('-vv', action='store_true')
-  parser.add_argument('-vvv', action='store_true')
-  parser.add_argument('-vvvv', action='store_true')
-  parser.add_argument('-vvvvv', action='store_true')
+  parser.add_argument('-l', '--reprocess_local_file', help='local zone file to reprocess')
+  parser.add_argument('--verbose', '-v', action='count', default=0)
   args = parser.parse_args()
-  log_level = 4
-  if args.v:
-    log_level = 1
-  elif args.vv:
-    log_level = 2
-  elif args.vvv:
-    log_level = 3
-  elif args.vvvv:
-    log_level = 4
-  elif args.vvvvv:
-    log_level = 5
 
+  log_level = args.verbose if args.verbose else 3
   setup_logging(log_level)
-  save_to_mysql(config_file=args.config_file)
+  save_to_mysql(config_file=args.config_file, reprocess_local_file=args.reprocess_local_file)

@@ -117,3 +117,4 @@ credentials.csv
 vendor/
 zonefiles/
 cert_dot_sh/*.csv
+cert_dot_sh/*.csv.part

@@ -4,4 +4,5 @@ mysql:
 
 czdap:
   base_url: https://czdap.icann.org
+  zone_file_uri: /en/download-zone-data
   token: djbzklbvzklbkdvbzkdbkvbzkfvbzkvbzkjbjksdvb

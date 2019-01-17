@@ -145,23 +145,9 @@ def setup_logging(log_level):
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='open net scans')
   parser.add_argument('-c', '--config_file', default='config.json', help='absolute path to config file')
-  parser.add_argument('-v', action='store_true')
-  parser.add_argument('-vv', action='store_true')
-  parser.add_argument('-vvv', action='store_true')
-  parser.add_argument('-vvvv', action='store_true')
-  parser.add_argument('-vvvvv', action='store_true')
+  parser.add_argument('--verbose', '-v', action='count', default=3)
   args = parser.parse_args()
-  log_level = 0
-  if args.v:
-    log_level = 1
-  elif args.vv:
-    log_level = 2
-  elif args.vvv:
-    log_level = 3
-  elif args.vvvv:
-    log_level = 4
-  elif args.vvvvv:
-    log_level = 5
 
+  log_level = args.verbose if args.verbose else 3
   setup_logging(log_level)
   main(config_file=args.config_file)
