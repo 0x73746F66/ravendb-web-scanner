@@ -3,6 +3,8 @@
 
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
+from yaml import load
+from os import path, getcwd
 import requests
 import json
 import base64
@@ -13,26 +15,19 @@ s = requests.Session()
 
 # Load the config file and validate.
 try:
-  configFile = open("config.json", "r")
-  config = json.load(configFile)
-  configFile.close()
+  config_file = path.join(path.realpath(getcwd()), 'config.yaml')
+  with open(config_file, 'r') as f:
+    config = load(f.read())
+
 except:
   sys.stderr.write("Error loading config.json file.\n")
   exit(1)
-if not config.has_key('token'):
+if 'token' not in config['czdap']:
   sys.stderr.write("'token' parameter not found in the config.json file\n")
   exit(1)
-if not config.has_key('base_url'):
+if 'base_url' not in config['czdap']:
   sys.stderr.write("'base_url' parameter not found in the config.json file\n")
   exit(1)
-
-# For development purposes, we sometimes run this against an environment with
-# basic auth and a self-signed certificate. If these params are present, use
-# them. If you're not a developer working on CZDAP itself, ignore these.
-if config.has_key('auth_user') and config.has_key('auth_pass'):
-  s.auth = (config['auth_user'], config['auth_pass'])
-if config.has_key('ssl_skip_verify'):
-  s.verify = False
 
 # Load the private key.
 try:
@@ -45,7 +40,7 @@ except:
   exit(1)
 
 # Get the credentials JSON from CZDAP API.
-r = s.get(config['base_url'] + '/user-credentials.json?token=' + config['token'])
+r = s.get(config['czdap']['base_url'] + '/user-credentials.json?token=' + config['czdap']['token'])
 if r.status_code != 200:
   sys.stderr.write("Unexpected response from CZDAP. Are you sure your token and base_url are correct in config.json?\n")
   exit(1)
