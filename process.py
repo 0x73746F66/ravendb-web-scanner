@@ -293,11 +293,12 @@ def collect_remote_files():
     exit(1)
 
   urls = download_zonefile_list(base_url=c['czdap']['base_url'], token=c['czdap']['token'])
-
+  log.info("caching remote zonefiles")
   for full_uri in urls:
     uri = urljoin(full_uri, urlparse(full_uri).path)
     obj = cache_remote(uri)
-    files.add(path.join(zonefile_dir, obj['file']))
+    if obj:
+      files.add(path.join(zonefile_dir, obj['file']))
 
   return list(files)
 
@@ -352,8 +353,10 @@ def extract_new_domains(zonefile_path):
   if not cache.has_key(cache_key):
     czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
     uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
-    cache_remote(uri)
+    cached = cache_remote(uri)
     cache.close()
+    if not cached:
+      return
 
   cache = shelve.open(cache_path, writeback=True)
   try:
@@ -430,7 +433,8 @@ def collect_local_files(reprocess_local_file=None):
     if force_download:
       czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
       uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
-      cache_remote(uri)
+      if not cache_remote(uri):
+        return
       compressed_zonefile_path = zonefile_path + '.gz'
       to_download.append(compressed_zonefile_path)
     else:
@@ -448,6 +452,7 @@ def collect_local_files(reprocess_local_file=None):
     return list(to_process)
 
   local_files = get_local_files(zonefile_dir)
+  log.info('processing new downloads')
   cache_path = c['records'].get('cache_path', 'pyshelf.db')
   cache = shelve.open(cache_path)
 
@@ -500,6 +505,8 @@ def collect_local_files(reprocess_local_file=None):
 def main(reprocess_local_file=None):
   log = logging.getLogger()
   to_process = collect_local_files(reprocess_local_file)
+  if not to_process:
+    return
   for zonefile in to_process:
     new_data = extract_new_domains(zonefile)
     if new_data:
