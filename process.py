@@ -299,7 +299,7 @@ def collect_remote_files():
   if not cache_path:
     log.critical('cache_path was missing from the config')
     exit(1)
-  cache = shelve.open(cache_path, writeback=True)
+  cache = shelve.open(cache_path)
   try:
     for full_uri in urls:
       now = datetime.utcnow().replace(microsecond=0)
@@ -310,7 +310,7 @@ def collect_remote_files():
         last_cached = datetime.strptime(obj['cached'], '%Y-%m-%dT%H:%M:%S')
         delta = now - last_cached
         if delta.days == 0:
-          log.info("%s cache is still fresh" % uri)
+          log.info("%s is already in cache for today" % uri)
           files.add(path.join(zonefile_dir, obj['file']))
           continue
       obj = cache_remote(uri)
@@ -354,7 +354,7 @@ def cache_remote(uri):
   if not cache_path:
     log.critical('cache_path was missing from the config')
     exit(1)
-  cache = shelve.open(cache_path, writeback=True)
+  cache = shelve.open(cache_path)
   try:
     cache[key] = json.dumps(obj)
   finally:
@@ -383,19 +383,15 @@ def extract_new_domains(zonefile_path):
     log.critical('cache_path was missing from the config')
     exit(1)
   cache = shelve.open(cache_path)
-  cache_key = zonefile + '.gz'
-  if not cache.has_key(cache_key):
-    czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
-    uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
-    cached = cache_remote(uri)
-    cache.close()
-    if not cached:
-      return
-
-  if cache_path:
-    cache = shelve.open(cache_path, writeback=True)
-
+  cache_key = str(zonefile + '.gz')
   try:
+    if not cache.has_key(cache_key):
+      czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
+      uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
+      cached = cache_remote(uri)
+      if not cached:
+        return
+
     remote = json.loads(cache[cache_key])
     czdap_id = int(remote['id'])
     scanned_time = datetime.utcnow().replace(microsecond=0)
@@ -408,11 +404,11 @@ def extract_new_domains(zonefile_path):
         continue
 
       domain, tld, ttl, ns = re.search(regex, line).groups()
-      fqdn = '.'.join([domain, tld])
+      fqdn = str('.'.join([domain, tld]))
       last_scanned = False
       
       if force_persist:
-        log.debug('%s queue for persistance' % fqdn)
+        log.debug('Forced queue for persistance %s' % fqdn)
         mysql_data.append({
           'domain': domain,
           'tld': tld,
@@ -477,7 +473,7 @@ def check_files():
 
   try:
     for dest_path in to_download:
-      dest_file = ''.join(dest_path.split('/')[-1:])
+      dest_file = str(''.join(dest_path.split('/')[-1:]))
       zonefile = dest_path.replace('.gz', '', 1)
       if not cache.has_key(dest_file):
         raise Exception('cache error')
