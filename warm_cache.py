@@ -133,9 +133,9 @@ if __name__ == '__main__':
     for fqdn, updated in sql(query):
       key = str(fqdn)
       if cache.has_key(key):
-        log.debug('cache hit')
+        log.info('%s cache hit' % key)
       else:
-        log.debug('cache miss')
+        log.info('%s cache miss' % key)
         last_scanned = datetime.strptime(str(updated), '%Y-%m-%d %H:%M:%S')
         cache[key] = last_scanned.isoformat()
   finally:
