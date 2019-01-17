@@ -112,6 +112,7 @@ czdap.private.key
 config.yaml
 credentials.json
 credentials.csv
+**/*.db
 
 # others
 vendor/

@@ -2,7 +2,16 @@ mysql:
   user: root
   db: scans
 
+zonefile_dir: /tmp/zonefiles
+
+force_download: False # skip local file size comparission to remote file size, if no local file it will always download
 czdap:
   base_url: https://czdap.icann.org
   zone_file_uri: /en/download-zone-data
   token: djbzklbvzklbkdvbzkdbkvbzkfvbzkvbzkjbjksdvb
+
+force_persist: False # skip cache check for records.stale_days value, if cache miss it will always persist
+records:
+  regex: '^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
+  cache_path: /tmp/scans.db
+  stale_days: 28 # 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import re, logging, gzip, shutil, requests, sys, json, colorlog, argparse, mysql.connector
+import re, logging, gzip, shutil, requests, sys, json, colorlog, argparse, mysql.connector, shelve
 from os import path, getcwd, makedirs, isatty
 from glob import glob
-from urlparse import urlparse
+from urlparse import urljoin, urlparse
 from mysql.connector import errorcode
 from yaml import load, dump
 from datetime import datetime
@@ -92,7 +92,10 @@ def upsert_into(table, inserts):
     for field, schema in model.items():
       if field in [i for i in i_values]:
         if schema['type'] == 'datetime':
-          i_params[field] = i_values[field].strftime('%Y-%m-%d %H:%M:%S')
+          if isinstance(i_values[field], str):
+            i_params[field] = i_values[field]
+          else:
+            i_params[field] = i_values[field].strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(i_values[field], eval(schema['type'])):
           i_params[field] = i_values[field]
         else:
@@ -252,7 +255,8 @@ def download_zonefile_list(base_url, token):
 
   return list(set(urls))
 
-def local_files(dest_dir):
+
+def get_local_files(dest_dir):
   files = []
   for filepath in glob('%s/*.txt.gz' % dest_dir):
     filename = ''.join(filepath.split('/')[-1:])
@@ -260,109 +264,260 @@ def local_files(dest_dir):
 
   return files
 
-def save_to_mysql(config_file, reprocess_local_file=None):
-  c = get_config(config_file=config_file)
-  regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
+
+def absolute_path(path_in):
+  path_out = path_in
+  proj_root = path.realpath(getcwd())
+  if path_in.startswith('./'):
+    path_out = path.join(proj_root, path_in.replace('./', ''))
+  elif not path_in.startswith('/'):
+    path_out = path.join(proj_root, path_in)
+
+  return path_out
+
+
+def collect_remote_files():
+  c = get_config()
+  log = logging.getLogger()
+  files = set()
+
+  zonefile_dir = absolute_path(c.get('zonefile_dir'))
+  if not path.exists(zonefile_dir):
+    makedirs(zonefile_dir)
+
+  if 'czdap' not in c or not c['czdap'].get('token'):
+    log.critical("'token' parameter not found in the config file")
+    exit(1)
+  if 'czdap' not in c or not c['czdap'].get('base_url'):
+    log.critical("'base_url' parameter not found in the config file")
+    exit(1)
+
+  urls = download_zonefile_list(base_url=c['czdap']['base_url'], token=c['czdap']['token'])
+
+  for full_uri in urls:
+    uri = urljoin(full_uri, urlparse(full_uri).path)
+    obj = cache_remote(uri)
+    files.add(path.join(zonefile_dir, obj['file']))
+
+  return list(files)
+
+
+def cache_remote(uri):
+  c = get_config()
+  log = logging.getLogger()
+  url = c['czdap']['base_url'] + uri + '?token=' + c['czdap'].get('token')
+  czdap_id = int(''.join(uri.split('/')[-1:]))
+  remote_file, file_size = get_remote_stat(url)
+  if not remote_file:
+    log.warning('Cannot cache %s' % uri)
+    return
+
+  pieces = remote_file.split('-')[1:]
+  pieces.insert(0, str(czdap_id))
+  key = '-'.join(pieces)
+  obj = {
+    'id': czdap_id,
+    'size': file_size,
+    'file': remote_file,
+    'uri': uri
+  }
+  cache_path = c['records'].get('cache_path', 'shelf.db')
+  cache = shelve.open(cache_path, writeback=True)
+  try:
+    cache[key] = json.dumps(obj)
+  finally:
+    cache.close()
+  return obj
+
+def extract_new_domains(zonefile_path):
+  c = get_config()
   log = logging.getLogger()
 
-  base_dir = 'zonefiles'
-  proj_root = path.realpath(getcwd())
-  fq_path = path.join(proj_root, base_dir)
+  if not path.isfile(zonefile_path):
+    log.error('missing zonefile %s' % zonefile_path)
+    return
 
-  if not path.exists(base_dir):
-    makedirs(base_dir)
+  mysql_data = []
+  zonefile = ''.join(zonefile_path.split('/')[-1:])
+  default_regex = r"^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$"
+  regex = c['records'].get('regex')
+  if not regex:
+    regex = default_regex
 
-  files = local_files(fq_path)
+  force_persist = c.get('force_persist', False)
+  stale_days = int(c['records'].get('stale_days', 0))
+  cache_path = c['records'].get('cache_path', 'shelf.db')
+  cache = shelve.open(cache_path)
+  cache_key = zonefile + '.gz'
+  if not cache.has_key(cache_key):
+    czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
+    uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
+    cache_remote(uri)
+    cache.close()
 
-  files_to_process = set()
-  if not reprocess_local_file:
-    if 'czdap' not in c or not c['czdap'].get('token'):
-      log.critical("'token' parameter not found in the %s file" % config_file)
-      exit(1)
-    if 'czdap' not in c or not c['czdap'].get('base_url'):
-      log.critical("'base_url' parameter not found in the %s file" % config_file)
-      exit(1)
+  cache = shelve.open(cache_path, writeback=True)
+  try:
+    remote = json.loads(cache[cache_key])
+    czdap_id = int(remote['id'])
+    scanned_time = datetime.utcnow().replace(microsecond=0)
 
-    urls = download_zonefile_list(base_url=c['czdap']['base_url'], token=c['czdap']['token'])
-
-    for uri in urls:
-      url = c['czdap']['base_url'] + uri
-      czdap_id = int(''.join(''.join(uri.split('?')[:-1]).split('/')[-1:]))
-      remote_file, file_size = get_remote_stat(url)
-      if not remote_file:
-        log.warning('Skipping %s' % uri)
+    for line in open(zonefile_path, 'r').readlines():
+      log.debug(line)
+      num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
+      if num == 0:
+        log.debug('No match found for line\n%s' % line)
         continue
 
-      human_size = Byte(file_size).best_prefix()
-      dest_file_pieces = remote_file.split('-')[1:]
-      dest_file_pieces.insert(0, str(czdap_id))
-      dest_file = '-'.join(dest_file_pieces)
-      if dest_file in files:
-        local_file_path = path.join(fq_path, dest_file)
-        local_size = path.getsize(local_file_path)
-        if local_size == file_size:
-          log.info("Matched local file [%s] skipping download.." % dest_file)
-          continue
-        else:
-          log.info("Local file [%s] is stale" % dest_file)
-
-      log.info("Downloading %s (this may take a while)" % human_size)
-      dest_path = path.join(fq_path, dest_file)
-      download(url, dest_path)
-      log.info("Downloaded %s" % dest_file)
-      plaintext_file = decompress(dest_path)
-      log.info("Decompressed as %s" % plaintext_file)
-      files_to_process.add(plaintext_file)
-
-  if reprocess_local_file:
-    plaintext_file = path.join(fq_path, reprocess_local_file)
-    files_to_process.add(plaintext_file)
-
-  for plaintext_file in files_to_process:
-    if path.isfile(plaintext_file):
-      log_inserts = []
-      scanned_time = datetime.utcnow()
-      dest_file = ''.join(plaintext_file.split('/')[-1:])
-      czdap_id = int(''.join(dest_file.split('-')[:1]))
-      remote_file = c['czdap']['base_url'] + path.join(c['czdap']['zone_file_uri'], str(czdap_id))
-
-      for line in open(plaintext_file, 'r').readlines():
-        o = {}
-        log.debug(line)
-        matches = re.finditer(regex, line, re.MULTILINE)
-        num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
-        if num == 0:
-          log.debug('No match found for line\n%s' % line)
-
-        for match in matches:
-          domain = match.group(1)
-          tld = match.group(2)
-          ttl = match.group(3)
-          ns = match.group(4)
-
-        fqdn = '.'.join([domain, tld])
-        log_inserts.append({
+      domain, tld, ttl, ns = re.search(regex, line).groups()
+      fqdn = '.'.join([domain, tld])
+      last_scanned = False
+      
+      if force_persist:
+        log.debug('%s queue for persistance' % fqdn)
+        mysql_data.append({
           'domain': domain,
           'tld': tld,
           'fqdn': fqdn,
-          'local_file': dest_file,
-          'remote_file': remote_file,
+          'local_file': zonefile,
+          'remote_file': remote['uri'],
           'czdap_id': czdap_id,
-          'nameserver': ns['ns'],
-          'ttl': ns['ttl'],
-          'scanned': scanned_time
+          'nameserver': ns,
+          'ttl': ttl,
+          'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
         })
+        continue
 
-      # commit per file
-      if log_inserts:
-        n = 1000
-        log.info('Found %d items, splitting into %d chunks' % (len(log_inserts), n))
-        final = [log_inserts[i * n:(i + 1) * n] for i in range((len(log_inserts) + n - 1) // n )]  
-        for upserts in final:
-          upsert_into('scan_log', upserts)
-      # log.info('Found %d items' % len(log_inserts))
-      # upsert_into('scan_log', log_inserts)
-    exit(0)
+      if cache.has_key(fqdn):
+        log.debug('cache hit')
+        last_scanned = datetime.strptime(cache[fqdn], '%Y-%m-%dT%H:%M:%S')
+        delta = scanned_time - last_scanned
+      else:
+        log.debug('cache miss')
+        cache[fqdn] = scanned_time.isoformat()
+        
+      if not last_scanned or delta.days >= stale_days:
+        log.debug('%s queue for persistance' % fqdn)
+        mysql_data.append({
+          'domain': domain,
+          'tld': tld,
+          'fqdn': fqdn,
+          'local_file': zonefile,
+          'remote_file': remote['uri'],
+          'czdap_id': czdap_id,
+          'nameserver': ns,
+          'ttl': ttl,
+          'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
+        })
+      else:
+        log.debug('Skipping %s persistance' % fqdn)
+  finally:
+    cache.close()
+  
+  return mysql_data
+
+
+def collect_local_files(reprocess_local_file=None):
+  c = get_config()
+  log = logging.getLogger()
+
+  to_download = []
+  to_process = set()
+
+  force_download = c.get('force_download', False)
+  zonefile_dir = absolute_path(c.get('zonefile_dir'))
+  if reprocess_local_file:
+    zonefile_path = absolute_path(reprocess_local_file)
+    if force_download:
+      czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
+      uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
+      cache_remote(uri)
+      compressed_zonefile_path = zonefile_path + '.gz'
+      to_download.append(compressed_zonefile_path)
+    else:
+      if not path.isfile(zonefile_path):
+        zonefile_path = path.join(zonefile_dir, args.reprocess_local_file)
+      if not path.isfile(zonefile_path):
+        log.error('file not found: %s' % args.reprocess_local_file)
+        return
+      to_process.add(zonefile_path)
+  else:
+    to_download = collect_remote_files()
+
+  if not to_download:
+    log.info('nothing to download')
+    return list(to_process)
+
+  local_files = get_local_files(zonefile_dir)
+  cache_path = c['records'].get('cache_path', 'shelf.db')
+  cache = shelve.open(cache_path)
+
+  try:
+    for dest_path in to_download:
+      dest_file = ''.join(dest_path.split('/')[-1:])
+      plaintext_file = dest_path.replace('.gz', '', 1)
+      if not cache.has_key(dest_file):
+        raise Exception('cache error')
+
+      remote = json.loads(cache[dest_file])
+      url = c['czdap']['base_url'] + remote['uri'] + '?token=' + c['czdap'].get('token')
+      human_size = Byte(remote['size']).best_prefix()
+
+      if force_download:
+        log.info("Force download [{size}] {uri} > {file}".format(
+          size=human_size,
+          uri=remote['uri'],
+          file=dest_path
+        ))
+        if download(url, dest_path):
+          decompress(dest_path)
+          log.info("Decompressed as %s" % plaintext_file)
+          to_process.add(plaintext_file)
+        continue
+
+      if dest_file in local_files:
+        local_size = path.getsize(dest_path)
+        if local_size == remote['size']:
+          log.info("Matched local file [%s] skipping download.." % dest_file)
+          to_process.add(plaintext_file)
+          continue
+
+      log.info("Downloading [{size}] {uri} > {file}".format(
+        size=human_size,
+        uri=remote['uri'],
+        file=dest_path
+      ))
+      if download(url, dest_path):
+        decompress(dest_path)
+        log.info("Decompressed as %s" % plaintext_file)
+        to_process.add(plaintext_file)
+
+  finally:
+    cache.close()
+
+  return list(to_process)
+
+
+def main(reprocess_local_file=None):
+  log = logging.getLogger()
+  to_process = collect_local_files(reprocess_local_file)
+  for zonefile in to_process:
+    new_data = extract_new_domains(zonefile)
+    if new_data:
+      n = 1000
+      num_records = len(new_data)
+      if num_records <= n:
+        log.info('Found %d items' % num_records)
+        upsert_into('scan_log', new_data)
+        log.info('Database persistance success')
+        continue
+
+      log.info('Found %d items, splitting into %d chunks' % (num_records, n))
+      final = [new_data[i * n:(i + 1) * n] for i in range((num_records + n - 1) // n )]  
+      for upserts in final:
+        upsert_into('scan_log', upserts)
+      log.info('Database persistance success')
+    else:
+      log.info('Found no new items')
 
 
 if __name__ == '__main__':
@@ -374,4 +529,6 @@ if __name__ == '__main__':
 
   log_level = args.verbose if args.verbose else 3
   setup_logging(log_level)
-  save_to_mysql(config_file=args.config_file, reprocess_local_file=args.reprocess_local_file)
+  get_config(config_file=args.config_file)
+
+  main(reprocess_local_file=args.reprocess_local_file)
