@@ -294,11 +294,39 @@ def collect_remote_files():
 
   urls = download_zonefile_list(base_url=c['czdap']['base_url'], token=c['czdap']['token'])
   log.info("caching remote zonefiles")
-  for full_uri in urls:
-    uri = urljoin(full_uri, urlparse(full_uri).path)
-    obj = cache_remote(uri)
-    if obj:
-      files.add(path.join(zonefile_dir, obj['file']))
+
+  cache_path = c['records'].get('cache_path')
+  if not cache_path:
+    log.critical('cache_path was missing from the config')
+    exit(1)
+  cache = shelve.open(cache_path, writeback=True)
+  try:
+    for full_uri in urls:
+      now = datetime.utcnow().replace(microsecond=0)
+      uri = urljoin(full_uri, urlparse(full_uri).path)
+      key = str(uri.replace('/', ''))
+      if cache.has_key(key):
+        obj = json.loads(cache[key])
+        last_cached = datetime.strptime(obj['cached'], '%Y-%m-%dT%H:%M:%S')
+        delta = now - last_cached
+        if delta.days == 0:
+          log.info("%s cache is still fresh" % uri)
+          files.add(path.join(zonefile_dir, obj['file']))
+          continue
+      obj = cache_remote(uri)
+      if obj:
+        czdap_id = int(''.join(uri.split('/')[-1:]))
+        pieces = obj['file'].split('-')[1:]
+        pieces.insert(0, str(czdap_id))
+        dest_file = '-'.join(pieces)
+        cache[key] = json.dumps({
+          'cached': now.isoformat(),
+          'file': dest_file
+        })
+        files.add(path.join(zonefile_dir, dest_file))
+
+  finally:
+    cache.close()
 
   return list(files)
 
@@ -322,7 +350,10 @@ def cache_remote(uri):
     'file': remote_file,
     'uri': uri
   }
-  cache_path = c['records'].get('cache_path', 'shelf.db')
+  cache_path = c['records'].get('cache_path')
+  if not cache_path:
+    log.critical('cache_path was missing from the config')
+    exit(1)
   cache = shelve.open(cache_path, writeback=True)
   try:
     cache[key] = json.dumps(obj)
@@ -347,7 +378,10 @@ def extract_new_domains(zonefile_path):
 
   force_persist = c.get('force_persist', False)
   stale_days = int(c['records'].get('stale_days', 0))
-  cache_path = c['records'].get('cache_path', 'shelf.db')
+  cache_path = c['records'].get('cache_path')
+  if not cache_path:
+    log.critical('cache_path was missing from the config')
+    exit(1)
   cache = shelve.open(cache_path)
   cache_key = zonefile + '.gz'
   if not cache.has_key(cache_key):
@@ -358,7 +392,9 @@ def extract_new_domains(zonefile_path):
     if not cached:
       return
 
-  cache = shelve.open(cache_path, writeback=True)
+  if cache_path:
+    cache = shelve.open(cache_path, writeback=True)
+
   try:
     remote = json.loads(cache[cache_key])
     czdap_id = int(remote['id'])
@@ -419,47 +455,30 @@ def extract_new_domains(zonefile_path):
   return mysql_data
 
 
-def collect_local_files(reprocess_local_file=None):
+def check_files():
   c = get_config()
   log = logging.getLogger()
 
-  to_download = []
-  to_process = set()
-
   force_download = c.get('force_download', False)
   zonefile_dir = absolute_path(c.get('zonefile_dir'))
-  if reprocess_local_file:
-    zonefile_path = absolute_path(reprocess_local_file)
-    if force_download:
-      czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
-      uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
-      if not cache_remote(uri):
-        return
-      compressed_zonefile_path = zonefile_path + '.gz'
-      to_download.append(compressed_zonefile_path)
-    else:
-      if not path.isfile(zonefile_path):
-        zonefile_path = path.join(zonefile_dir, args.reprocess_local_file)
-      if not path.isfile(zonefile_path):
-        log.error('file not found: %s' % args.reprocess_local_file)
-        return
-      to_process.add(zonefile_path)
-  else:
-    to_download = collect_remote_files()
+  to_download = collect_remote_files()
 
   if not to_download:
     log.info('nothing to download')
-    return list(to_process)
+    return
 
   local_files = get_local_files(zonefile_dir)
   log.info('processing new downloads')
-  cache_path = c['records'].get('cache_path', 'pyshelf.db')
+  cache_path = c['records'].get('cache_path')
+  if not cache_path:
+    log.critical('cache_path was missing from the config')
+    exit(1)
   cache = shelve.open(cache_path)
 
   try:
     for dest_path in to_download:
       dest_file = ''.join(dest_path.split('/')[-1:])
-      plaintext_file = dest_path.replace('.gz', '', 1)
+      zonefile = dest_path.replace('.gz', '', 1)
       if not cache.has_key(dest_file):
         raise Exception('cache error')
 
@@ -475,56 +494,69 @@ def collect_local_files(reprocess_local_file=None):
         ))
         if download(url, dest_path):
           decompress(dest_path)
-          log.info("Decompressed as %s" % plaintext_file)
-          to_process.add(plaintext_file)
-        continue
+          log.info("Decompressed as %s" % zonefile)
 
-      if dest_file in local_files:
+      elif dest_file in local_files:
         local_size = path.getsize(dest_path)
         if local_size == remote['size']:
           log.info("Matched local file [%s] skipping download.." % dest_file)
-          to_process.add(plaintext_file)
-          continue
+      else:
+        log.info("Downloading [{size}] {uri} > {file}".format(
+          size=human_size,
+          uri=remote['uri'],
+          file=dest_path
+        ))
+        if download(url, dest_path):
+          decompress(dest_path)
+          log.info("Decompressed as %s" % zonefile)
 
-      log.info("Downloading [{size}] {uri} > {file}".format(
-        size=human_size,
-        uri=remote['uri'],
-        file=dest_path
-      ))
-      if download(url, dest_path):
-        decompress(dest_path)
-        log.info("Decompressed as %s" % plaintext_file)
-        to_process.add(plaintext_file)
+      parse_file(zonefile)
 
   finally:
     cache.close()
 
-  return list(to_process)
+def parse_file(zonefile):
+  log = logging.getLogger()
+  new_data = extract_new_domains(zonefile)
+  if new_data:
+    n = 1000
+    num_records = len(new_data)
+    if num_records <= n:
+      log.info('Found %d items' % num_records)
+      upsert_into('scan_log', new_data)
+      log.info('Database persistance success')
+      return
+
+    log.info('Found %d items, splitting into %d chunks' % (num_records, n))
+    final = [new_data[i * n:(i + 1) * n] for i in range((num_records + n - 1) // n )]  
+    for upserts in final:
+      upsert_into('scan_log', upserts)
 
 
 def main(reprocess_local_file=None):
   log = logging.getLogger()
-  to_process = collect_local_files(reprocess_local_file)
-  if not to_process:
-    return
-  for zonefile in to_process:
-    new_data = extract_new_domains(zonefile)
-    if new_data:
-      n = 1000
-      num_records = len(new_data)
-      if num_records <= n:
-        log.info('Found %d items' % num_records)
-        upsert_into('scan_log', new_data)
-        log.info('Database persistance success')
-        continue
-
-      log.info('Found %d items, splitting into %d chunks' % (num_records, n))
-      final = [new_data[i * n:(i + 1) * n] for i in range((num_records + n - 1) // n )]  
-      for upserts in final:
-        upsert_into('scan_log', upserts)
-      log.info('Database persistance success')
+  c = get_config()
+  zonefile_dir = absolute_path(c.get('zonefile_dir'))
+  if reprocess_local_file:
+    force_download = c.get('force_download', False)
+    zonefile_path = absolute_path(reprocess_local_file)
+    if force_download:
+      czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
+      uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
+      if not cache_remote(uri):
+        return
+      compressed_zonefile_path = zonefile_path + '.gz'
+      parse_file(compressed_zonefile_path)
     else:
-      log.info('Found no new items')
+      if not path.isfile(zonefile_path):
+        zonefile_path = path.join(zonefile_dir, args.reprocess_local_file)
+      if not path.isfile(zonefile_path):
+        log.error('file not found: %s' % args.reprocess_local_file)
+        return
+      parse_file(zonefile_path)
+
+  if not check_files():
+    log.warning('It appears there is no work to do')
 
 
 if __name__ == '__main__':
