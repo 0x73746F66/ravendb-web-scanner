@@ -382,6 +382,9 @@ def extract_new_domains(zonefile_path):
   if not cache_path:
     log.critical('cache_path was missing from the config')
     exit(1)
+
+  num_lines = 0
+  num_matches = 0
   cache = shelve.open(cache_path)
   cache_key = str(zonefile + '.gz')
   try:
@@ -395,14 +398,15 @@ def extract_new_domains(zonefile_path):
     remote = json.loads(cache[cache_key])
     czdap_id = int(remote['id'])
     scanned_time = datetime.utcnow().replace(microsecond=0)
-
     for line in open(zonefile_path, 'r').readlines():
       log.debug(line)
+      num_lines += 1
       num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
       if num == 0:
         log.debug('No match found for line\n%s' % line)
         continue
 
+      num_matches += 1
       domain, tld, ttl, ns = re.search(regex, line).groups()
       fqdn = str('.'.join([domain, tld]))
       last_scanned = False
@@ -447,7 +451,9 @@ def extract_new_domains(zonefile_path):
         log.debug('Skipping %s persistance' % fqdn)
   finally:
     cache.close()
-  
+
+  log.info('Matched %d of %d domains' % (num_matches, num_lines))
+
   return mysql_data
 
 
@@ -476,7 +482,8 @@ def check_files():
       dest_file = str(''.join(dest_path.split('/')[-1:]))
       zonefile = dest_path.replace('.gz', '', 1)
       if not cache.has_key(dest_file):
-        raise Exception('cache error')
+        log.warning('cache error %s for %s' % (dest_file, zonefile))
+        continue
 
       remote = json.loads(cache[dest_file])
       url = c['czdap']['base_url'] + remote['uri'] + '?token=' + c['czdap'].get('token')
@@ -514,16 +521,21 @@ def check_files():
 def parse_file(zonefile):
   log = logging.getLogger()
   new_data = extract_new_domains(zonefile)
+  if not new_data:
+    log.info('Found no new items for %s' % zonefile)
+    return
   if new_data:
     n = 1000
     num_records = len(new_data)
+    log.info('Found new %d items' % num_records)
+    if num_records == 0:
+      return
     if num_records <= n:
-      log.info('Found %d items' % num_records)
       upsert_into('scan_log', new_data)
       log.info('Database persistance success')
       return
 
-    log.info('Found %d items, splitting into %d chunks' % (num_records, n))
+    log.info('Splitting into %d chunks' % n)
     final = [new_data[i * n:(i + 1) * n] for i in range((num_records + n - 1) // n )]  
     for upserts in final:
       upsert_into('scan_log', upserts)
@@ -550,6 +562,7 @@ def main(reprocess_local_file=None):
         log.error('file not found: %s' % args.reprocess_local_file)
         return
       parse_file(zonefile_path)
+      return
 
   if not check_files():
     log.warning('It appears there is no work to do')
