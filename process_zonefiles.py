@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
 import re, logging, gzip, shutil, requests, sys, json, colorlog, argparse, mysql.connector, shelve
+import OpenSSL, ssl, socket
 from os import path, getcwd, makedirs, isatty
 from glob import glob
 from urlparse import urljoin, urlparse
@@ -19,14 +20,12 @@ def sanitize(filter):
   """
   return filter
 
-
 def get_from_model(table_name, key, default=None):
   model_file = path.join(path.realpath(getcwd()), 'model', '%s.yaml' % table_name)
   with open(model_file, 'r') as f:
     schema = load(f.read())
 
   return schema.get(key, default)
-
 
 def sql(query):
   log = logging.getLogger()
@@ -72,7 +71,6 @@ def sql(query):
     cnx.close()
 
   return rows
-
 
 def upsert_into(table, inserts):
   log = logging.getLogger()
@@ -149,7 +147,6 @@ def select_from(table, filter=None):
 
   return sql(query)
 
-
 def get_config(config_file=None):
   global config
 
@@ -161,7 +158,6 @@ def get_config(config_file=None):
 
   return config
 
-
 def get_session():
   global session
 
@@ -169,7 +165,6 @@ def get_session():
     session = requests.Session()
 
   return session
-
 
 def get_remote_stat(url):
   session = get_session()
@@ -183,7 +178,6 @@ def get_remote_stat(url):
   file_size = int(r.headers['Content-Length'])
 
   return dest_file, file_size
-
 
 def download(url, dest_path):
   session = get_session()
@@ -199,14 +193,12 @@ def download(url, dest_path):
 
   return dest_path
 
-
 def decompress(file_path):
   new_dest = file_path.replace('.gz', '', 1)
   with gzip.open(file_path, 'rb') as f_in:
     with open(new_dest, 'wb') as f_out:
       shutil.copyfileobj(f_in, f_out)
   return new_dest
-
 
 def setup_logging(log_level):
   log = logging.getLogger()
@@ -238,7 +230,6 @@ def setup_logging(log_level):
   if log_level >= 5:
     log.setLevel(logging.DEBUG)
 
-
 def download_zonefile_list(base_url, token):
   session = get_session()
   log = logging.getLogger()
@@ -255,7 +246,6 @@ def download_zonefile_list(base_url, token):
 
   return list(set(urls))
 
-
 def get_local_files(dest_dir):
   files = []
   for filepath in glob('%s/*.txt.gz' % dest_dir):
@@ -263,7 +253,6 @@ def get_local_files(dest_dir):
     files.append(filename)
 
   return files
-
 
 def absolute_path(path_in):
   path_out = path_in
@@ -274,7 +263,6 @@ def absolute_path(path_in):
     path_out = path.join(proj_root, path_in)
 
   return path_out
-
 
 def collect_remote_files():
   c = get_config()
@@ -329,7 +317,6 @@ def collect_remote_files():
     cache.close()
 
   return list(files)
-
 
 def cache_remote(uri):
   c = get_config()
@@ -456,7 +443,6 @@ def extract_new_domains(zonefile_path):
 
   return mysql_data
 
-
 def check_files():
   c = get_config()
   log = logging.getLogger()
@@ -539,7 +525,6 @@ def parse_file(zonefile):
     final = [new_data[i * n:(i + 1) * n] for i in range((num_records + n - 1) // n )]  
     for upserts in final:
       upsert_into('scan_log', upserts)
-
 
 def main(reprocess_local_file=None):
   log = logging.getLogger()
