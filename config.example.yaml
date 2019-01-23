@@ -5,7 +5,8 @@ mysql:
   host: 1.255.0.0
   port: 1234
 
-zonefile_dir: /tmp/zonefiles
+tmp_dir: /tmp/zonefiles
+zonefile_dir: /var/spool/netscan/zonefiles
 
 force_download: False # skip local file size comparission to remote file size, if no local file it will always download
 czdap:
@@ -13,8 +14,23 @@ czdap:
   zone_file_uri: /en/download-zone-data
   token: djbzklbvzklbkdvbzkdbkvbzkfvbzkvbzkjbjksdvb
 
+ftp:
+  - server: rz.verisign-grs.com
+    user: ancdef
+    passwd: 123456
+
 force_persist: False # skip cache check for records.stale_days value, if cache miss it will always persist
 records:
   regex: '^([a-zA-Z0-9-]+)[.]{1}([a-zA-Z0-9-]+)[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
-  cache_path: /tmp/scans.db
+  cache_path: /var/cache/netscan/scans.db
   stale_days: 28
+
+
+shodan_api_key: abcdef123456fedcba654321
+
+osint:
+  base_dir: "{home}/Documents/osint"
+  shodan_dir: "{domain}/shodan/"
+  whois_dir: "{domain}/whois/"
+  dns_dir: "{domain}/dns/"
+  https_dir: "{domain}/https/"

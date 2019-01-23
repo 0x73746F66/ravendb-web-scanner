@@ -2,7 +2,7 @@
 # -*- coding:utf-8
 import re, logging, gzip, shutil, requests, sys, json, colorlog, argparse, mysql.connector, shelve
 import OpenSSL, ssl, socket
-from os import path, getcwd, makedirs, isatty
+from os import path, getcwd, makedirs, isatty, errno
 from glob import glob
 from urlparse import urljoin, urlparse
 from mysql.connector import errorcode
@@ -193,8 +193,11 @@ def download(url, dest_path):
 
   return dest_path
 
-def decompress(file_path):
-  new_dest = file_path.replace('.gz', '', 1)
+def decompress(file_path, new_dest=None):
+  if not new_dest and file_path.endswith('.gz'):
+    new_dest = file_path.replace('.gz', '', 1)
+  elif not new_dest:
+    new_dest = file_path + '.part'
   with gzip.open(file_path, 'rb') as f_in:
     with open(new_dest, 'wb') as f_out:
       shutil.copyfileobj(f_in, f_out)
@@ -269,9 +272,9 @@ def collect_remote_files():
   log = logging.getLogger()
   files = set()
 
-  zonefile_dir = absolute_path(c.get('zonefile_dir'))
-  if not path.exists(zonefile_dir):
-    makedirs(zonefile_dir)
+  tmp_dir = absolute_path(c.get('tmp_dir'))
+  if not path.exists(tmp_dir):
+    makedirs(tmp_dir)
 
   if 'czdap' not in c or not c['czdap'].get('token'):
     log.critical("'token' parameter not found in the config file")
@@ -299,7 +302,7 @@ def collect_remote_files():
         delta = now - last_cached
         if delta.days == 0:
           log.info("%s is already in cache for today" % uri)
-          files.add(path.join(zonefile_dir, obj['file']))
+          files.add(path.join(tmp_dir, obj['file']))
           continue
       obj = cache_remote(uri)
       if obj:
@@ -311,7 +314,7 @@ def collect_remote_files():
           'cached': now.isoformat(),
           'file': dest_file
         })
-        files.add(path.join(zonefile_dir, dest_file))
+        files.add(path.join(tmp_dir, dest_file))
 
   finally:
     cache.close()
@@ -385,57 +388,59 @@ def extract_new_domains(zonefile_path):
     remote = json.loads(cache[cache_key])
     czdap_id = int(remote['id'])
     scanned_time = datetime.utcnow().replace(microsecond=0)
-    for line in open(zonefile_path, 'r').readlines():
-      log.debug(line)
-      num_lines += 1
-      num = sum(1 for _ in re.finditer(regex, line, re.MULTILINE))
-      if num == 0:
-        log.debug('No match found for line\n%s' % line)
-        continue
 
-      num_matches += 1
-      domain, tld, ttl, ns = re.search(regex, line).groups()
-      fqdn = str('.'.join([domain, tld]))
-      last_scanned = False
-      
-      if force_persist:
-        log.debug('Forced queue for persistance %s' % fqdn)
-        mysql_data.append({
-          'domain': domain,
-          'tld': tld,
-          'fqdn': fqdn,
-          'local_file': zonefile,
-          'remote_file': remote['uri'],
-          'czdap_id': czdap_id,
-          'nameserver': ns,
-          'ttl': ttl,
-          'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
-        })
-        continue
+    with open(zonefile_path, 'r') as f:
+      for line in f:
+        log.debug(line)
+        num_lines += 1
+        num = sum(1 for _ in re.finditer(regex, line))
+        if num == 0:
+          log.debug('No match found for line\n%s' % line)
+          continue
 
-      if cache.has_key(fqdn):
-        log.debug('cache hit')
-        last_scanned = datetime.strptime(cache[fqdn], '%Y-%m-%dT%H:%M:%S')
-        delta = scanned_time - last_scanned
-      else:
-        log.debug('cache miss')
-        cache[fqdn] = scanned_time.isoformat()
+        num_matches += 1
+        domain, tld, ttl, ns = re.search(regex, line).groups()
+        fqdn = str('.'.join([domain, tld]))
+        last_scanned = False
         
-      if not last_scanned or delta.days >= stale_days:
-        log.debug('%s queue for persistance' % fqdn)
-        mysql_data.append({
-          'domain': domain,
-          'tld': tld,
-          'fqdn': fqdn,
-          'local_file': zonefile,
-          'remote_file': remote['uri'],
-          'czdap_id': czdap_id,
-          'nameserver': ns,
-          'ttl': ttl,
-          'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
-        })
-      else:
-        log.debug('Skipping %s persistance' % fqdn)
+        if force_persist:
+          log.debug('Forced queue for persistance %s' % fqdn)
+          mysql_data.append({
+            'domain': domain,
+            'tld': tld,
+            'fqdn': fqdn,
+            'local_file': zonefile,
+            'remote_file': remote['uri'],
+            'czdap_id': czdap_id,
+            'nameserver': ns,
+            'ttl': ttl,
+            'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
+          })
+          continue
+
+        if cache.has_key(fqdn):
+          log.debug('cache hit')
+          last_scanned = datetime.strptime(cache[fqdn], '%Y-%m-%dT%H:%M:%S')
+          delta = scanned_time - last_scanned
+        else:
+          log.debug('cache miss')
+          cache[fqdn] = scanned_time.isoformat()
+          
+        if not last_scanned or delta.days >= stale_days:
+          log.debug('%s queue for persistance' % fqdn)
+          mysql_data.append({
+            'domain': domain,
+            'tld': tld,
+            'fqdn': fqdn,
+            'local_file': zonefile,
+            'remote_file': remote['uri'],
+            'czdap_id': czdap_id,
+            'nameserver': ns,
+            'ttl': ttl,
+            'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
+          })
+        else:
+          log.debug('Skipping %s persistance' % fqdn)
   finally:
     cache.close()
 
@@ -448,6 +453,7 @@ def check_files():
   log = logging.getLogger()
 
   force_download = c.get('force_download', False)
+  tmp_dir = absolute_path(c.get('tmp_dir'))
   zonefile_dir = absolute_path(c.get('zonefile_dir'))
   to_download = collect_remote_files()
 
@@ -455,7 +461,7 @@ def check_files():
     log.info('nothing to download')
     return
 
-  local_files = get_local_files(zonefile_dir)
+  local_files = list(set(get_local_files(tmp_dir) + get_local_files(zonefile_dir)))
   log.info('processing new downloads')
   cache_path = c['records'].get('cache_path')
   if not cache_path:
@@ -466,15 +472,19 @@ def check_files():
   try:
     for dest_path in to_download:
       dest_file = str(''.join(dest_path.split('/')[-1:]))
-      zonefile = dest_path.replace('.gz', '', 1)
+      zonefile = dest_file.replace('.gz', '', 1)
+      zonefile_dir = absolute_path(c.get('zonefile_dir'))
+      zonefile_path = path.join(zonefile_dir, zonefile)
+
       if not cache.has_key(dest_file):
-        log.warning('cache error %s for %s' % (dest_file, zonefile))
+        log.warning('cache error %s for %s' % (dest_file, zonefile_path))
         continue
 
       remote = json.loads(cache[dest_file])
       url = c['czdap']['base_url'] + remote['uri'] + '?token=' + c['czdap'].get('token')
       human_size = Byte(remote['size']).best_prefix()
 
+      will_download = True
       if force_download:
         log.info("Force download [{size}] {uri} > {file}".format(
           size=human_size,
@@ -483,13 +493,20 @@ def check_files():
         ))
         if download(url, dest_path):
           decompress(dest_path)
-          log.info("Decompressed as %s" % zonefile)
+          log.info("Decompressed as %s" % zonefile_path)
 
       elif dest_file in local_files:
-        local_size = path.getsize(dest_path)
+        try:
+          local_size = path.getsize(dest_path)
+        except OSError as e:
+          if e.errno == errno.ENOENT:
+            local_size = 0
+          else:
+            raise
         if local_size == remote['size']:
           log.info("Matched local file [%s] skipping download.." % dest_file)
-      else:
+          will_download = False
+      if will_download:
         log.info("Downloading [{size}] {uri} > {file}".format(
           size=human_size,
           uri=remote['uri'],
@@ -497,9 +514,9 @@ def check_files():
         ))
         if download(url, dest_path):
           decompress(dest_path)
-          log.info("Decompressed as %s" % zonefile)
+          log.info("Decompressed as %s" % zonefile_path)
 
-      parse_file(zonefile)
+      parse_file(zonefile_path)
 
   finally:
     cache.close()
@@ -529,25 +546,40 @@ def parse_file(zonefile):
 def main(reprocess_local_file=None):
   log = logging.getLogger()
   c = get_config()
+  tmp_dir = absolute_path(c.get('tmp_dir'))
   zonefile_dir = absolute_path(c.get('zonefile_dir'))
   if reprocess_local_file:
     force_download = c.get('force_download', False)
-    zonefile_path = absolute_path(reprocess_local_file)
+    if path.isfile(absolute_path(reprocess_local_file)):
+      zonefile_path = absolute_path(reprocess_local_file)
+    if path.isfile(path.join(tmp_dir, reprocess_local_file)):
+      zonefile_path = path.join(tmp_dir, reprocess_local_file)
+    if path.isfile(path.join(zonefile_dir, reprocess_local_file)):
+      zonefile_path = path.join(zonefile_dir, reprocess_local_file)
+
+    if zonefile_path.endswith('.gz'):
+      compressed_zonefile_path = zonefile_path
+      zonefile_path = zonefile_path.replace('.gz', '')
+    else:
+      compressed_zonefile_path = zonefile_path + '.gz'
+
+    if not path.isfile(zonefile_path):
+      log.error('file not found: %s' % zonefile_path)
+      return
+
     if force_download:
       czdap_id = ''.join(zonefile_path.split('/')[-1:]).split('-')[0]
       uri = path.join(c['czdap'].get('zone_file_uri'), czdap_id)
       if not cache_remote(uri):
         return
-      compressed_zonefile_path = zonefile_path + '.gz'
-      parse_file(compressed_zonefile_path)
-    else:
-      if not path.isfile(zonefile_path):
-        zonefile_path = path.join(zonefile_dir, args.reprocess_local_file)
-      if not path.isfile(zonefile_path):
-        log.error('file not found: %s' % args.reprocess_local_file)
+      if not path.isfile(compressed_zonefile_path):
+        log.error('file not found: %s' % compressed_zonefile_path)
         return
-      parse_file(zonefile_path)
-      return
+      download(c['czdap'].get('base_url') + uri, compressed_zonefile_path)
+      decompress(compressed_zonefile_path, zonefile_path)
+
+    parse_file(zonefile_path)
+    return
 
   if not check_files():
     log.warning('It appears there is no work to do')
