@@ -319,8 +319,7 @@ def process(domain_a):
       if cache.has_key(key):
         log.info('%s cache hit' % key)
         del cache[key]
-        last_scanned = now
-        # last_scanned = datetime.strptime(str(cache[key]), '%Y-%m-%dT%H:%M:%S.%f')
+        last_scanned = datetime.strptime(str(cache[key]), '%Y-%m-%dT%H:%M:%S.%f')
       else:
         log.info('%s cache miss' % key)
         last_scanned = now
@@ -332,29 +331,29 @@ def process(domain_a):
         return
 
       updated_date = now.strftime('%Y-%m-%d')
-      # if save_whois(fqdn, whois_dir=path.join(base_dir, c['osint'].get('whois_dir').format(domain=fqdn))):
-      #   log.info('saved whois for %s' % fqdn)
+      if save_whois(fqdn, whois_dir=path.join(base_dir, c['osint'].get('whois_dir').format(domain=fqdn))):
+        log.info('saved whois for %s' % fqdn)
 
       host = get_a(fqdn, nameservers=list(ns_a))
       if host and save_shodan(host, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=fqdn))):
         log.info('saved shodan for %s' % fqdn)
 
-      # dns_dir = path.join(base_dir, c['osint'].get('dns_dir').format(domain=fqdn))
-      # if not path.exists(dns_dir):
-      #   makedirs(dns_dir)
+      dns_dir = path.join(base_dir, c['osint'].get('dns_dir').format(domain=fqdn))
+      if not path.exists(dns_dir):
+        makedirs(dns_dir)
 
-      # dns_data = {
-      #   'updated_date': updated_date,
-      #   'a': host,
-      #   'cname': get_cnames(fqdn, nameservers=list(ns_a)),
-      #   'mx': get_mx(fqdn, nameservers=list(ns_a)),
-      #   'soa': get_soa(fqdn, nameservers=list(ns_a)),
-      #   'txt': get_txt(fqdn, nameservers=list(ns_a))
-      # }
-      # file_name = path.join(dns_dir, updated_date + '.json')
-      # with open(file_name, 'w+') as f:
-      #   log.info('saved dns data for %s' % fqdn)
-      #   f.write(json.dumps(dns_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o)))
+      dns_data = {
+        'updated_date': updated_date,
+        'a': host,
+        'cname': get_cnames(fqdn, nameservers=list(ns_a)),
+        'mx': get_mx(fqdn, nameservers=list(ns_a)),
+        'soa': get_soa(fqdn, nameservers=list(ns_a)),
+        'txt': get_txt(fqdn, nameservers=list(ns_a))
+      }
+      file_name = path.join(dns_dir, updated_date + '.json')
+      with open(file_name, 'w+') as f:
+        log.info('saved dns data for %s' % fqdn)
+        f.write(json.dumps(dns_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o)))
 
       https_dir = path.join(base_dir, c['osint'].get('https_dir').format(domain=fqdn))
       if not path.exists(https_dir):
@@ -381,9 +380,9 @@ def process(domain_a):
             hosts = set(fqdn)
             for domain in cert['subjectAltName'].split(','):
               hosts.add(''.join(domain.split('DNS:')).strip())
-            if save_spider(hosts, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
-              log.info('saved spider for %s' % fqdn)
-            exit(0)
+            # if save_spider(hosts, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
+            #   log.info('saved spider for %s' % fqdn)
+            # exit(0)
 
   finally:
     cache.close()
@@ -399,7 +398,7 @@ if __name__ == '__main__':
   setup_logging(log_level)
 
   query = "SELECT CONCAT(d.name, '.', t.name) as fqdn, n.nameserver FROM scans.domain d INNER JOIN scans.tld t ON d.tld_id = t.id LEFT JOIN scans.link_domain_ns l ON d.id = l.domain_id LEFT JOIN scans.nameservers n ON n.id = l.ns_id ORDER BY d.updated DESC"
-  # query += ' LIMIT 50000'
+  query += ' LIMIT 10000'
   domain_a = {}
   for d, ns in sql(query):
     if not d in domain_a:
