@@ -16,8 +16,21 @@ czdap:
 
 ftp:
   - server: rz.verisign-grs.com
-    user: ancdef
+    user: abcdef
     passwd: 123456
+    regex: '^([a-zA-Z0-9-]+)\s+NS\s+([a-zA-Z0-9-\.]+).$'
+    files:
+      - md5checksum: com.zone.gz.md5
+        file_path: com.zone.gz
+        tld: com
+  - server: rzname.verisign-grs.com
+    user: abcdef
+    passwd: 123456
+    regex: '^([a-zA-Z0-9-]+)\s+NS\s+([a-zA-Z0-9-\.]+).$'
+    files:
+      - md5checksum: master.name.zone.gz.md5
+        file_path: master.name.zone.gz
+        tld: name
 
 force_persist: False # skip cache check for records.stale_days value, if cache miss it will always persist
 records:

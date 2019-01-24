@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
 import requests, logging, colorlog, argparse, mysql.connector, shelve, OpenSSL, ssl, socket
-import dns, dns.resolver, json, shodan, time, urllib2, re
+import dns, dns.resolver, json, shodan, time, urllib2, re, multiprocessing
 from functools import wraps
 from os import path, getcwd, isatty, makedirs
 from urlparse import urljoin, urlparse
@@ -9,6 +9,8 @@ from mysql.connector import errorcode
 from yaml import load
 from datetime import datetime
 from pythonwhois import get_whois
+from pythonwhois.shared import WhoisException
+from socket import error as SocketError
 
 
 config = None
@@ -126,7 +128,7 @@ def get_session():
 
 def setup_logging(log_level):
   log = logging.getLogger()
-  format_str = '%(asctime)s - %(levelname)-8s - %(message)s'
+  format_str = '%(asctime)s - %(process)d - %(levelname)-8s - %(message)s'
   date_format = '%Y-%m-%d %H:%M:%S'
   if isatty(2):
     cformat = '%(log_color)s' + format_str
@@ -178,7 +180,12 @@ def get_certificate(host, port=443, timeout=10):
   except:
     return None, None
   if r.status_code != 200:
-    log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+    if str(r.status_code).startswith('3'):
+      log.warning("Ignoring %d redirect for URL %s" % (r.status_code, url))
+    elif r.status_code == 404:
+      log.warning("Ignoring Not Found %s" % url)
+    else:
+      log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
     return None, None
 
   context = ssl.create_default_context()
@@ -196,11 +203,14 @@ def get_certificate(host, port=443, timeout=10):
 @retry((dns.resolver.NoNameservers, dns.exception.Timeout), tries=20, delay=1, backoff=0.5, logger=logging.getLogger()) # 1.8 hrs
 def get_dns_record(domain, record, nameservers=None):
   resolver = dns.resolver.get_default_resolver()
-  if nameservers:
-    resolver.nameservers = nameservers + resolver.nameservers
+  ns_a = resolver.nameservers
+  default_nameservers = ['9.9.9.9', '1.1.1.1', '208.67.222.222', '8.8.8.8', '64.6.64.6', '84.200.69.80', '216.146.35.35', '198.41.0.4', '192.58.128.30', '199.7.83.42', '199.9.14.201', '192.5.5.241']
+  for n in nameservers + default_nameservers:
+    ns_a.append(str(n))
+  resolver.nameservers = ns_a
   try:
     return resolver.query(domain, record)
-  except (dns.resolver.NoAnswer):
+  except (dns.resolver.NoAnswer, dns.exception.SyntaxError, dns.resolver.NXDOMAIN):
     return
 
 def get_cnames(domain, nameservers=None):
@@ -250,11 +260,14 @@ def get_txt(domain, nameservers=None):
       results.add(data)
   return list(results)
 
+@retry((SocketError), tries=20, delay=1, backoff=0.5, logger=logging.getLogger()) # 1.8 hrs
 def save_whois(host, whois_dir):
   if not path.exists(whois_dir):
     makedirs(whois_dir)
-
-  r = get_whois(host)
+  try:
+    r = get_whois(host)
+  except (WhoisException):
+    return
   updated_date = datetime.utcnow().strftime('%Y-%m-%d')
   file_name = path.join(whois_dir, updated_date + '.json')
   with open(file_name, 'w+') as f:
@@ -283,26 +296,30 @@ def save_spider(hosts, spider_dir):
 
   for host in hosts:
     html = None
-    is_https = True
     url = 'https://' + host
     try:
       website = urllib2.urlopen(url)
       html = website.read()
     except:
-      is_https = False
       url = 'http://' + host
       try:
         website = urllib2.urlopen(url)
         html = website.read()
       except:
         pass
+    if html:
+      links_tuple = re.findall(r"\"(((http|ftp)s?:)?/{1,2}.*?)\"", html)
+      links = set()
+      for g1, g2, g3 in links_tuple:
+        links.add(g1)
+      links = '\n'.join(list(links))
 
-    links1 = re.findall('"((http|ftp)s?://.*?)"', html)
-    links2 = re.findall('"(//.*?)"', html)
+      updated_date = datetime.utcnow().replace(microsecond=0).strftime('%Y-%m-%d')
+      file_name = path.join(spider_dir, updated_date + '_links.txt')
+      with open(file_name, 'w+') as f:
+        f.write(links)
 
-    for link in set(links1 + links2):
-      print link
-
+@retry((Exception), tries=20, delay=1, backoff=0.5, logger=logging.getLogger()) # 1.8 hrs
 def process(domain_a):
   c = get_config(config_file=args.config_file)
   log = logging.getLogger()
@@ -310,26 +327,35 @@ def process(domain_a):
   base_dir = c['osint'].get('base_dir').format(home=path.expanduser('~'))
   stale_days = c['records'].get('stale_days', 0)
 
-  cache_path = c['records'].get('cache_path', 'pyshelf.db')
-  cache = shelve.open(cache_path, writeback=True)
+  if not NO_CACHE:
+    cache_path = c['records'].get('cache_path', 'pyshelf.db')
+    cache = shelve.open(cache_path, writeback=True)
   try:
     for fqdn, ns_a in domain_a.items():
       now = datetime.utcnow().replace(microsecond=0)
+      should_process = True if NO_CACHE else False
       key = 'osint_' + str(fqdn)
-      if cache.has_key(key):
-        log.info('%s cache hit' % key)
-        del cache[key]
-        last_scanned = datetime.strptime(str(cache[key]), '%Y-%m-%dT%H:%M:%S.%f')
-      else:
-        log.info('%s cache miss' % key)
+
+      if not NO_CACHE:
         last_scanned = now
-        cache[key] = last_scanned.isoformat()
+        if cache.has_key(key):
+          log.info('%s cache hit' % fqdn)
+          last_scanned = datetime.strptime(str(cache[key]), '%Y-%m-%dT%H:%M:%S')
+        else:
+          log.info('%s cache miss' % fqdn)
+          should_process = True
 
-      delta = now - last_scanned
-      if delta.days < stale_days:
-        log.info('%s stale, skipping' % fqdn)
-        return
+        delta = now - last_scanned
+        if delta.days > stale_days:
+          should_process = True
+          log.info('%s is stale, processing' % fqdn)
+          continue
 
+      if not should_process:
+        continue
+
+      if not NO_CACHE:
+        cache[key] = now.isoformat()
       updated_date = now.strftime('%Y-%m-%d')
       if save_whois(fqdn, whois_dir=path.join(base_dir, c['osint'].get('whois_dir').format(domain=fqdn))):
         log.info('saved whois for %s' % fqdn)
@@ -380,28 +406,50 @@ def process(domain_a):
             hosts = set(fqdn)
             for domain in cert['subjectAltName'].split(','):
               hosts.add(''.join(domain.split('DNS:')).strip())
-            # if save_spider(hosts, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
-            #   log.info('saved spider for %s' % fqdn)
-            # exit(0)
+            save_spider(hosts, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn)))
+            log.info('saved spider for %s' % fqdn)
 
   finally:
-    cache.close()
-
+    if not NO_CACHE:
+      cache.close()
 
 if __name__ == '__main__':
+  global NO_CACHE
   parser = argparse.ArgumentParser(description='open net scans')
-  parser.add_argument('-c', '--config_file', default='config.yaml', help='absolute path to config file')
+  parser.add_argument('-c', '--config-file', default='config.yaml', help='absolute path to config file')
+  parser.add_argument('-L', '--limit', type=int, default=5000)
+  parser.add_argument('-n', '--no-cache', default=False, action='store_true')
   parser.add_argument('--verbose', '-v', action='count', default=0)
   args = parser.parse_args()
+
+  NO_CACHE = args.no_cache
 
   log_level = args.verbose if args.verbose else 3
   setup_logging(log_level)
 
-  query = "SELECT CONCAT(d.name, '.', t.name) as fqdn, n.nameserver FROM scans.domain d INNER JOIN scans.tld t ON d.tld_id = t.id LEFT JOIN scans.link_domain_ns l ON d.id = l.domain_id LEFT JOIN scans.nameservers n ON n.id = l.ns_id ORDER BY d.updated DESC"
-  query += ' LIMIT 10000'
-  domain_a = {}
-  for d, ns in sql(query):
-    if not d in domain_a:
-      domain_a[d] = set()
-    domain_a[d].add(ns)
-  process(domain_a)
+  num_records = int(sql('SELECT COUNT(*) FROM domain')[0][0])
+  offset = 0
+  loop = 0
+  loops = 1 + (num_records / args.limit)
+  
+  processes = []
+  while loops != 0:
+    loop += 1
+    query = "SELECT CONCAT(d.name, '.', t.name) as fqdn, n.nameserver FROM scans.domain d INNER JOIN scans.tld t ON d.tld_id = t.id LEFT JOIN scans.link_domain_ns l ON d.id = l.domain_id LEFT JOIN scans.nameservers n ON n.id = l.ns_id ORDER BY d.updated DESC"
+    q_limit = ' LIMIT %d, %d' % (offset, args.limit)
+    query += q_limit
+
+    domain_a = {}
+    for d, ns in sql(query):
+      if not d in domain_a:
+        domain_a[d] = set()
+      domain_a[d].add(ns)
+
+    t = multiprocessing.Process(target=process, args=(domain_a,))
+    processes.append(t)
+    t.start()
+    offset = args.limit * loop
+    loops -= 1
+
+  for one_process in processes:
+    one_process.join()

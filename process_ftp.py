@@ -63,11 +63,22 @@ def ftp_filesize(ftp, filename):
   def put_stat(s):
     global stat
     stat = s
+  size = 0
   log = logging.getLogger()
   log.info('checking file sze for %s' % filename)
   regex = r"^[-rwx]{10}\s+\d+\s+\w+\s+\w+\s+(\d+)\s+(.+)\s.+$"
   ftp.dir(filename, lambda data: put_stat(data))
-  size, last_mod_date = re.search(regex, stat).groups()
+  match = re.search(regex, stat)
+  if match:
+    size, last_mod_date = match.groups()
+  try:
+    ftp.sendcmd("TYPE i") # Switch to Binary mode
+    ftp.size(filename, lambda data: put_stat(data))
+    size = stat
+    ftp.sendcmd("TYPE A") # Switch to ASCII mode
+  except:
+    pass
+
   return int(size)
 
 def validateIntegrity(orighash, destfilepath):
@@ -81,7 +92,7 @@ def validateIntegrity(orighash, destfilepath):
 def md5_checksum(md5_file, target):
   md5hash = None
   with open(md5_file, 'r') as f:
-    md5hash = f.read()
+    md5hash = ''.join(re.findall(r"([a-fA-F\d]{32})", f.read()) or [])
   return validateIntegrity(md5hash.strip(), target)
 
 def decompress(file_path, new_dest):
@@ -201,6 +212,9 @@ def upsert_into(table, inserts):
     for i,key in enumerate(i_values):
       updates.append('`{col}`=VALUES(`{col}`)'.format(col=key))
 
+  if not cols or not values:
+    return
+
   query = """
     INSERT INTO {table} ({fields}) VALUES {values}
     ON DUPLICATE KEY UPDATE {updates}
@@ -257,20 +271,31 @@ def parse_file(zonefile_path, regex, tld, remote_file):
           continue
 
         num_matches += 1
-        domain, ns = re.search(regex, line).groups()
+        domain, ttl, ns = re.search(regex, line).groups()
         ns = ns.lower()
         domain = domain.lower()
         fqdn = str('.'.join([domain, tld]))
+        if ttl:
+          ttl = ttl.strip()
+        if not ttl.strip():
+          ttl = 86500
 
+        should_process = False
         cache_key = str(fqdn)
         if not cache.has_key(cache_key):
           log.debug('cache miss')
-          cache[cache_key] = scanned_time.isoformat()
+          should_process = True
+          last_scanned = scanned_time
+        else:
+          last_scanned = datetime.strptime(cache[cache_key], '%Y-%m-%dT%H:%M:%S')
 
-        last_scanned = datetime.strptime(cache[cache_key], '%Y-%m-%dT%H:%M:%S')
         delta = scanned_time - last_scanned
         if delta.days >= stale_days:
           log.debug('%s queue for persistance' % fqdn)
+          should_process = True
+
+        if should_process:
+          cache[cache_key] = scanned_time.isoformat()
           mysql_data.append({
             'domain': domain,
             'tld': tld,
@@ -278,10 +303,9 @@ def parse_file(zonefile_path, regex, tld, remote_file):
             'local_file': zonefile,
             'remote_file': remote_file,
             'nameserver': ns,
-            'ttl': 86500,
+            'ttl': ttl,
             'scanned': scanned_time.strftime('%Y-%m-%d %H:%M:%S')
           })
-          cache[cache_key] = scanned_time.isoformat()
         num_records = len(mysql_data)
         if num_records >= n:
           log.info('Found new %d items' % num_records)
@@ -323,13 +347,17 @@ def main():
         ftp_download(ftp, md5hash_file, md5_file_path)
         target_file = z.get('file_path')
         target_file_path = path.join(zonefile_dir, target_file)
-        target_size = ftp_filesize(ftp, target_file)
-        human_size = Byte(target_size).best_prefix()
-        log.info('%s is %s' % (target_file, human_size))
         zonefile_path = path.join(zonefile_dir, target_file.replace('.gz', '.txt', 1))
-        if md5_checksum(md5_file_path, target_file_path):
-          log.info('file %s matches checksum. skipping' % target_file)
-        elif ftp_download(ftp, target_file, target_file_path):
+        download_zonefile = True
+        if path.isfile(target_file_path):
+          target_size = ftp_filesize(ftp, target_file)
+          human_size = Byte(target_size).best_prefix()
+          log.info('%s is %s' % (target_file, human_size))
+          if md5_checksum(md5_file_path, target_file_path):
+            log.info('file %s matches checksum. skipping' % target_file)
+            download_zonefile = False
+
+        if download_zonefile and ftp_download(ftp, target_file, target_file_path):
           log.info('Decompressing %s' % target_file)
           decompress(target_file_path, zonefile_path)
           log.info('Parsing %s' % zonefile_path)
