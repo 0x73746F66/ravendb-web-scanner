@@ -291,7 +291,7 @@ def save_spider(host, spider_dir):
             return True
 
 
-# @retry((Exception), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
+@retry((Exception), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
 def process(fqdn):
     c = get_config()
     log = logging.getLogger()
@@ -396,7 +396,6 @@ if __name__ == '__main__':
         t = multiprocessing.Process(target=process, args=(domain, ))
         processes.append(t)
         t.start()
-        break
 
     for one_process in processes:
         one_process.join()
