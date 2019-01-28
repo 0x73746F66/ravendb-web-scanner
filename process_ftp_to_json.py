@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import hashlib, argparse, logging, colorlog, re, shutil, gzip, mysql.connector, shelve, json, operator
-from os import path, isatty, getcwd, makedirs, unlink
+from os import path, isatty, getcwd, makedirs
 from yaml import load
 from ftplib import FTP
 from bitmath import Byte
@@ -191,12 +191,6 @@ def main():
                 remote = 'ftp://' + user + '@' + path.join(server, target_file)
                 scanned = datetime.utcnow().replace(microsecond=0).isoformat()
                 for new_json_data in parse_file(zonefile_path, regex):
-                    # new_json_data['tld'] = z.get('tld')
-                    # new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
-                    # fp = path.join(data_dir, new_json_data['fqdn'], 'zonefile.json')
-                    # if path.isfile(fp):
-                    #     unlink(fp)
-                    # continue
                     new_json_data['remote_file'] = remote
                     new_json_data['scanned'] = scanned
                     new_json_data['tld'] = z.get('tld')
