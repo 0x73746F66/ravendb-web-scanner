@@ -7,6 +7,7 @@ mysql:
 
 tmp_dir: /tmp/zonefiles
 zonefile_dir: /var/spool/netscan/zonefiles
+data_dir: "{home}/Documents/osint"
 
 force_download: False # skip local file size comparission to remote file size, if no local file it will always download
 czdap:
@@ -47,3 +48,4 @@ osint:
   whois_dir: "{domain}/whois/"
   dns_dir: "{domain}/dns/"
   https_dir: "{domain}/https/"
+  spider_dir: "{domain}/spider/"
