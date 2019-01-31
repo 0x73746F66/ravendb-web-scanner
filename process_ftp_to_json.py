@@ -1,13 +1,53 @@
 #!/usr/bin/env python
-import hashlib, argparse, logging, colorlog, re, shutil, gzip, mysql.connector, shelve, json, operator
+import time, hashlib, argparse, logging, colorlog, re, shutil, gzip, mysql.connector, shelve, json, operator, multiprocessing
 from os import path, isatty, getcwd, makedirs
 from yaml import load
 from ftplib import FTP
 from bitmath import Byte
+from functools import wraps
 from datetime import datetime
 
 config = None
 
+
+def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
+    """
+    :param ExceptionToCheck: the exception to check. may be a tuple of exceptions to check
+    :type ExceptionToCheck: Exception or tuple
+    :param tries: number of times to try (not retry) before giving up
+    :type tries: int
+    :param delay: initial delay between retries in seconds
+    :type delay: int
+    :param backoff: backoff multiplier e.g. value of 2 will double the delay each retry
+    :type backoff: int
+    :param logger: logger to use. If None, print
+    :type logger: logging.Logger instance
+    """
+
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck, e:
+                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    if logger:
+                        logger.warning(msg)
+                    else:
+                        print msg
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
+                except Exception as e:
+                    logger.critical(e)
+                    break
+            return f(*args, **kwargs)
+
+        return f_retry  # true decorator
+
+    return deco_retry
 
 def get_config(config_file=None):
     global config
@@ -23,7 +63,7 @@ def get_config(config_file=None):
 
 def setup_logging(log_level):
     log = logging.getLogger()
-    format_str = '%(asctime)s - %(levelname)-8s - %(message)s'
+    format_str = '%(asctime)s - %(process)d - %(levelname)-8s - %(message)s'
     date_format = '%Y-%m-%d %H:%M:%S'
     if isatty(2):
         cformat = '%(log_color)s' + format_str
@@ -145,6 +185,84 @@ def parse_file(zonefile_path, regex):
             }
 
 
+def write_to_json(new_json_data):
+    log = logging.getLogger()
+    conf = get_config()
+    data_dir = conf.get('data_dir').format(home=path.expanduser('~'))
+    json_dir = path.join(data_dir, new_json_data['fqdn'])
+    if not path.exists(json_dir):
+        makedirs(json_dir)
+    data_path = path.join(json_dir, 'zonefile.json')
+    log.info('Writing %s to %s' % (new_json_data['fqdn'], data_path))
+    if path.isfile(data_path):
+        with open(data_path, 'r') as r:
+            try:
+                file_data = json.loads(r.read())
+            except:
+                file_data = new_json_data.copy()
+                del file_data['scanned']
+                file_data['last_scan'] = u''
+                file_data['scans'] = []
+    else:
+        file_data = new_json_data.copy()
+        del file_data['scanned']
+        file_data['last_scan'] = u''
+        file_data['scans'] = []
+
+    file_data['local_file'] = new_json_data['local_file']
+    file_data['remote_file'] = new_json_data['remote_file']
+    file_data['ttl'] = new_json_data['ttl']
+    will_save = False
+    if file_data['last_scan'] == new_json_data['scanned']:
+        will_save = True
+        for i in range(len(file_data['scans'])):
+            if file_data['scans'][i]['scanned'] == new_json_data['scanned']:
+                scan = file_data['scans'][i].copy()
+                del file_data['scans'][i]
+                scan['nameservers'].append(new_json_data['nameservers'][0])
+                file_data['nameservers'] = scan['nameservers']
+
+                file_data['scans'].append(scan)
+                break
+    else:
+        file_data['nameservers'] = new_json_data['nameservers']
+        found_new = False
+        if len(file_data['scans']) == 0:
+            will_save = True
+            found_new = True
+        else:
+            file_data['scans'].sort(key=operator.itemgetter('scanned'))
+            if file_data['scans'][0]['remote_file'] != new_json_data['remote_file']:
+                found_new = True
+            if file_data['scans'][0]['local_file'] != new_json_data['local_file']:
+                found_new = True
+            if file_data['scans'][0]['ttl'] != new_json_data['ttl']:
+                found_new = True
+            if not found_new:
+                for ns in new_json_data['nameservers']:
+                    if ns not in file_data['scans'][0]['nameservers']:
+                        found_new = True
+                        break
+
+        if found_new:
+            del new_json_data['domain']
+            del new_json_data['tld']
+            del new_json_data['fqdn']
+            file_data['last_scan'] = new_json_data['scanned']
+            file_data['scans'].append(new_json_data)
+            will_save = True
+    if will_save:
+        with open(data_path, 'w+') as f:
+            f.write(json.dumps(file_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
+
+@retry(Exception, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())
+def ftp_session(server, user, passwd, use_pasv=True):
+    ftp = FTP(server)
+    if use_pasv:
+        ftp.set_pasv(True)
+    ftp.login(user, passwd)
+    return ftp
+
 def main():
     log = logging.getLogger()
     conf = get_config()
@@ -152,7 +270,6 @@ def main():
     if not path.isdir(tmp_dir):
         makedirs(tmp_dir)
     zonefile_dir = conf.get('zonefile_dir')
-    data_dir = conf.get('data_dir').format(home=path.expanduser('~'))
     if not path.isdir(zonefile_dir):
         makedirs(zonefile_dir)
 
@@ -161,10 +278,8 @@ def main():
         user = c.get('user')
         passwd = c.get('passwd')
         regex = c.get('regex')
-        ftp = FTP(server)
+        ftp = ftp_session(server, user, passwd)
         try:
-            ftp.set_pasv(True)
-            ftp.login(user, passwd)
             if not c.get('files'):
                 log.critical('files array needed in ftp conf')
                 exit(1)
@@ -190,69 +305,19 @@ def main():
                 log.info('Parsing %s' % zonefile_path)
                 remote = 'ftp://' + user + '@' + path.join(server, target_file)
                 scanned = datetime.utcnow().replace(microsecond=0).isoformat()
+
+                processes = []
                 for new_json_data in parse_file(zonefile_path, regex):
                     new_json_data['remote_file'] = remote
                     new_json_data['scanned'] = scanned
                     new_json_data['tld'] = z.get('tld')
                     new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
-                    json_dir = path.join(data_dir, new_json_data['fqdn'])
-                    if not path.exists(json_dir):
-                        makedirs(json_dir)
-                    data_path = path.join(json_dir, 'zonefile.json')
-                    if path.isfile(data_path):
-                        with open(data_path, 'r') as r:
-                            file_data = json.loads(r.read())
-                    else:
-                        file_data = new_json_data.copy()
-                        del file_data['scanned']
-                        file_data['last_scan'] = u''
-                        file_data['scans'] = []
+                    t = multiprocessing.Process(target=write_to_json, args=(new_json_data, ))
+                    processes.append(t)
+                    t.start()
 
-                    file_data['local_file'] = new_json_data['local_file']
-                    file_data['remote_file'] = new_json_data['remote_file']
-                    file_data['ttl'] = new_json_data['ttl']
-                    will_save = False
-                    if file_data['last_scan'] == scanned:
-                        will_save = True
-                        for i in range(len(file_data['scans'])):
-                            if file_data['scans'][i]['scanned'] == scanned:
-                                scan = file_data['scans'][i].copy()
-                                del file_data['scans'][i]
-                                scan['nameservers'].append(new_json_data['nameservers'][0])
-                                file_data['nameservers'] = scan['nameservers']
-
-                                file_data['scans'].append(scan)
-                                break
-                    else:
-                        file_data['nameservers'] = new_json_data['nameservers']
-                        found_new = False
-                        if len(file_data['scans']) == 0:
-                            will_save = True
-                            found_new = True
-                        else:
-                            file_data['scans'].sort(key=operator.itemgetter('scanned'))
-                            if file_data['scans'][0]['remote_file'] != new_json_data['remote_file']:
-                                found_new = True
-                            if file_data['scans'][0]['local_file'] != new_json_data['local_file']:
-                                found_new = True
-                            if file_data['scans'][0]['ttl'] != new_json_data['ttl']:
-                                found_new = True
-                            if not found_new:
-                                for ns in new_json_data['nameservers']:
-                                    if ns not in file_data['scans'][0]['nameservers']:
-                                        found_new = True
-                                        break
-
-                        if found_new:
-                            del new_json_data['domain']
-                            del new_json_data['tld']
-                            del new_json_data['fqdn']
-                            file_data['last_scan'] = scanned
-                            file_data['scans'].append(new_json_data)
-                            will_save = True
-                    if will_save:
-                        with open(data_path, 'w+') as f:
-                            f.write(json.dumps(file_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
+                for one_process in processes:
+                    one_process.join()
 
         finally:
             ftp.quit()
