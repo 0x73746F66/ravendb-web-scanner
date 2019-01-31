@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
 import requests, logging, colorlog, argparse, OpenSSL, ssl, socket
-import os, dns, dns.resolver, json, shodan, time, urllib2, re, multiprocessing
+import scandir, dns, dns.resolver, json, shodan, time, urllib2, re, multiprocessing
 from functools import wraps
 from os import path, getcwd, isatty, makedirs
 from urlparse import urljoin, urlparse
@@ -388,14 +388,13 @@ if __name__ == '__main__':
     base_dir = c['osint'].get('base_dir').format(home=path.expanduser('~'))
 
     processes = []
-    for dirName, subdirList, fileList in os.walk(base_dir):
-      if dirName != base_dir:
-        domain = dirName.replace(base_dir+'/', '')
-        if '/' in domain:
-          continue
-        t = multiprocessing.Process(target=process, args=(domain, ))
-        processes.append(t)
-        t.start()
+    for _, domains, other_files in scandir.walk(base_dir):
+        for domain in domains:
+            log.info('Queue %s to process' % domain)
+            t = multiprocessing.Process(target=process, args=(domain, ))
+            processes.append(t)
+            t.start()
 
-    for one_process in processes:
-        one_process.join()
+        for one_process in processes:
+            one_process.join()
+        break
