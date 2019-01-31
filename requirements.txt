@@ -9,3 +9,4 @@ pyOpenSSL==18.0.0
 dnspython==1.16.0
 pythonwhois==2.4.3
 shodan==1.10.4
+scandir==1.9.0
