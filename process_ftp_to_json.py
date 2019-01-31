@@ -300,27 +300,30 @@ def main():
                         download_zonefile = False
 
                 if download_zonefile and ftp_download(ftp, target_file, target_file_path):
-                    log.info('Decompressing %s' % target_file)
-                    decompress(target_file_path, zonefile_path)
-                log.info('Parsing %s' % zonefile_path)
-                remote = 'ftp://' + user + '@' + path.join(server, target_file)
-                scanned = datetime.utcnow().replace(microsecond=0).isoformat()
-
-                processes = []
-                for new_json_data in parse_file(zonefile_path, regex):
-                    new_json_data['remote_file'] = remote
-                    new_json_data['scanned'] = scanned
-                    new_json_data['tld'] = z.get('tld')
-                    new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
-                    t = multiprocessing.Process(target=write_to_json, args=(new_json_data, ))
-                    processes.append(t)
-                    t.start()
-
-                for one_process in processes:
-                    one_process.join()
-
+                    log.info('Download %s complete' % target_file)
+        # close early, or risk premature 432 Timeout error killing the script during decompressing large files
         finally:
             ftp.quit()
+
+        log.info('Decompressing %s' % target_file)
+        decompress(target_file_path, zonefile_path)
+        log.info('Parsing %s' % zonefile_path)
+        remote = 'ftp://' + user + '@' + path.join(server, target_file)
+        scanned = datetime.utcnow().replace(microsecond=0).isoformat()
+
+        processes = []
+        for new_json_data in parse_file(zonefile_path, regex):
+            new_json_data['remote_file'] = remote
+            new_json_data['scanned'] = scanned
+            new_json_data['tld'] = z.get('tld')
+            new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
+            t = multiprocessing.Process(target=write_to_json, args=(new_json_data, ))
+            processes.append(t)
+            t.start()
+
+        for one_process in processes:
+            one_process.join()
+
 
 
 if __name__ == '__main__':
