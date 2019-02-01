@@ -255,7 +255,7 @@ def write_to_json(new_json_data):
         with open(data_path, 'w+') as f:
             f.write(json.dumps(file_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
 
-@retry(Exception, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())
+@retry(Exception, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):
     ftp = FTP(server)
     if use_pasv:
@@ -301,7 +301,6 @@ def main():
 
                 if download_zonefile and ftp_download(ftp, target_file, target_file_path):
                     log.info('Download %s complete' % target_file)
-        # close early, or risk premature 432 Timeout error killing the script during decompressing large files
         finally:
             ftp.quit()
 
@@ -323,7 +322,6 @@ def main():
 
         for one_process in processes:
             one_process.join()
-
 
 
 if __name__ == '__main__':
