@@ -387,14 +387,9 @@ if __name__ == '__main__':
     c = get_config(config_file=args.config_file)
     base_dir = c['osint'].get('base_dir').format(home=path.expanduser('~'))
 
-    processes = []
+    pool = multiprocessing.Pool(c.get('multiprocessing_pools', 1000))
     for _, domains, other_files in scandir.walk(base_dir):
         for domain in domains:
             log.info('Queue %s to process' % domain)
-            t = multiprocessing.Process(target=process, args=(domain, ))
-            processes.append(t)
-            t.start()
-
-        for one_process in processes:
-            one_process.join()
+            pool.apply(process, args=(domain, ))
         break

@@ -310,18 +310,13 @@ def main():
         remote = 'ftp://' + user + '@' + path.join(server, target_file)
         scanned = datetime.utcnow().replace(microsecond=0).isoformat()
 
-        processes = []
+        pool = multiprocessing.Pool(c.get('multiprocessing_pools', 1000))
         for new_json_data in parse_file(zonefile_path, regex):
             new_json_data['remote_file'] = remote
             new_json_data['scanned'] = scanned
             new_json_data['tld'] = z.get('tld')
             new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
-            t = multiprocessing.Process(target=write_to_json, args=(new_json_data, ))
-            processes.append(t)
-            t.start()
-
-        for one_process in processes:
-            one_process.join()
+            pool.apply(write_to_json, args=(new_json_data, ))
 
 
 if __name__ == '__main__':
