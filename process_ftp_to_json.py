@@ -112,7 +112,7 @@ def ftp_filesize(ftp, filename):
 
     size = 0
     log = logging.getLogger()
-    log.info('checking file sze for %s' % filename)
+    log.info('checking file size for %s' % filename)
     regex = r"^[-rwx]{10}\s+\d+\s+\w+\s+\w+\s+(\d+)\s+(.+)\s.+$"
     ftp.dir(filename, lambda data: put_stat(data))
     match = re.search(regex, stat)
@@ -134,7 +134,7 @@ def validateIntegrity(orighash, destfilepath):
     desthash = None
     with open(destfilepath, "rb") as f:
         desthash = hashlib.md5(f.read()).hexdigest()
-    log.info('md5checksum %s == %s' % (orighash, desthash))
+    log.debug('md5checksum %s == %s' % (orighash, desthash))
     return orighash == desthash
 
 
@@ -294,7 +294,7 @@ def main():
                 if path.isfile(target_file_path):
                     target_size = ftp_filesize(ftp, target_file)
                     human_size = Byte(target_size).best_prefix()
-                    log.info('%s is %s' % (target_file, human_size))
+                    log.warn('%s is %s' % (target_file, human_size))
                     if md5_checksum(md5_file_path, target_file_path):
                         log.info('file %s matches checksum. skipping' % target_file)
                         download_zonefile = False
@@ -311,12 +311,16 @@ def main():
         scanned = datetime.utcnow().replace(microsecond=0).isoformat()
 
         pool = multiprocessing.Pool(c.get('multiprocessing_pools', 1000))
-        for new_json_data in parse_file(zonefile_path, regex):
-            new_json_data['remote_file'] = remote
-            new_json_data['scanned'] = scanned
-            new_json_data['tld'] = z.get('tld')
-            new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
-            pool.apply(write_to_json, args=(new_json_data, ))
+        try:
+            for new_json_data in parse_file(zonefile_path, regex):
+                new_json_data['remote_file'] = remote
+                new_json_data['scanned'] = scanned
+                new_json_data['tld'] = z.get('tld')
+                new_json_data['fqdn'] = str('.'.join([new_json_data['domain'], new_json_data['tld']]))
+                pool.apply_async(write_to_json, args=(new_json_data, ))
+        finally:
+            pool.close()
+        pool.join()
 
 
 if __name__ == '__main__':
