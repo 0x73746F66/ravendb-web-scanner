@@ -136,6 +136,8 @@ def get_certificate(host, port=443, timeout=10):
     if r.status_code != 200:
         if str(r.status_code).startswith('3'):
             log.warning("Ignoring %d redirect for URL %s" % (r.status_code, url))
+        elif r.status_code == 403:
+            log.warning("Ignoring Forbidden %s" % url)
         elif r.status_code == 404:
             log.warning("Ignoring Not Found %s" % url)
         else:
@@ -149,8 +151,11 @@ def get_certificate(host, port=443, timeout=10):
     DER = None
     try:
         DER = sock.getpeercert(True)
+    except:
+        return None, None
     finally:
         sock.close()
+
     PEM = ssl.DER_cert_to_PEM_cert(DER)
     return PEM, r.headers
 
@@ -225,7 +230,7 @@ def get_txt(domain, nameservers=None):
     return list(results)
 
 
-@retry((SocketError), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
+@retry(SocketError, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
 def save_whois(host, whois_dir):
     if not path.exists(whois_dir):
         makedirs(whois_dir)
@@ -261,21 +266,24 @@ def save_shodan(host, shodan_dir):
 
 
 def save_spider(host, spider_dir):
+    log = logging.getLogger()
     if not path.exists(spider_dir):
         makedirs(spider_dir)
 
     html = None
     url = 'https://' + host
+    log.info('Trying %s' % url)
     try:
         website = urllib2.urlopen(url)
         html = website.read()
     except:
         url = 'http://' + host
+        log.warn('Trying %s' % url)
         try:
             website = urllib2.urlopen(url)
             html = website.read()
-        except:
-            pass
+        except Exception as e:
+            log.error('Unable to crawl %s\t%s' % (host, e))
     if html:
         links_tuple = re.findall(r"\"(((http|ftp)s?:)?/{1,2}.*?)\"", html)
         links = set()
@@ -291,7 +299,6 @@ def save_spider(host, spider_dir):
             return True
 
 
-@retry((Exception), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
 def process(fqdn):
     c = get_config()
     log = logging.getLogger()
@@ -311,13 +318,13 @@ def process(fqdn):
             if 'nameservers' in file_data:
               nameservers = file_data['nameservers']
     if nameservers:
-      host = get_a(fqdn, nameservers=nameservers)
+      host_ip = get_a(fqdn, nameservers=nameservers)
       cname = get_cnames(fqdn, nameservers=nameservers),
       mx = get_mx(fqdn, nameservers=nameservers),
       soa = get_soa(fqdn, nameservers=nameservers),
       txt = get_txt(fqdn, nameservers=nameservers)
     else:
-      host = get_a(fqdn)
+      host_ip = get_a(fqdn)
       cname = get_cnames(fqdn),
       mx = get_mx(fqdn),
       soa = get_soa(fqdn),
@@ -325,7 +332,7 @@ def process(fqdn):
 
     dns_data = {
         'updated_date': updated_date,
-        'a': host,
+        'a': host_ip,
         'cname': cname,
         'mx': mx,
         'soa': soa,
@@ -339,10 +346,42 @@ def process(fqdn):
         log.info('saved dns data for %s' % fqdn)
         f.write(json.dumps(dns_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
 
-    if host and save_shodan(host, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=fqdn))):
+    if host_ip and save_shodan(host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=fqdn))):
         log.info('saved shodan for %s' % fqdn)
 
+    if save_spider(fqdn, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
+        log.info('saved spider for %s' % fqdn)
+
     https_dir = path.join(base_dir, c['osint'].get('https_dir').format(domain=fqdn))
+    cert = save_https(fqdn, host_ip, https_dir=https_dir)
+    if not cert:
+        return
+    log.info('saved https cert detail for %s' % fqdn)
+    if not cert.has_key('subjectAltName'):
+        return
+    log.debug('found subjectAltName %s' % cert['subjectAltName'])
+    domains = set()
+    for d in cert['subjectAltName'].split(','):
+        domain = ''.join(d.split('DNS:')).strip()
+        if not d.startswith('*'):
+            domains.add(domain)
+    for domain in domains:
+        sub_domain = fqdn, domain.replace(fqdn, '').rstrip('.')
+        sub_domain_path = path.join(fqdn, sub_domain)
+        sub_host_ip = get_a(domain)
+        if save_spider(domain, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=sub_domain_path))):
+            log.info('saved spider for %s' % domain)
+        
+        if save_shodan(sub_host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=sub_domain_path))):
+            log.info('saved shodan for %s' % domain)
+        https_subdir = path.join(base_dir, c['osint'].get('https_dir').format(domain=sub_domain_path))
+        if save_https(domain, sub_host_ip, https_dir=https_subdir):
+            log.info('saved https cert detail for %s' % domain)
+
+
+def save_https(fqdn, host_ip, https_dir):
+    now = datetime.utcnow().replace(microsecond=0)
+    updated_date = now.strftime('%Y-%m-%d')
     if not path.exists(https_dir):
         makedirs(https_dir)
     PEM, headers = get_certificate(fqdn)
@@ -351,28 +390,19 @@ def process(fqdn):
         with open(file_name, 'w+') as f:
             log.info('saved https headers for %s' % fqdn)
             f.write(json.dumps(headers, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o)))
-    if not PEM:
-        return
     file_name = path.join(https_dir, updated_date + '_key.pem')
     with open(file_name, 'w+') as f:
         log.info('saved key.pem for %s' % fqdn)
         f.write(PEM)
+
     cert = get_certificate_detail(cert=PEM)
     if not cert:
-        return
+        return False
     file_name = path.join(https_dir, updated_date + '_key_detail.json')
     with open(file_name, 'w+') as f:
-        log.info('saved https cert detail for %s' % fqdn)
         f.write(json.dumps(cert, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
-    if not cert.has_key('subjectAltName'):
-        return
-    log.info('found subjectAltName %s' % cert['subjectAltName'])
-    hosts = set(fqdn)
-    for domain in cert['subjectAltName'].split(','):
-        hosts.add(''.join(domain.split('DNS:')).strip())
-    for host in hosts:
-        if save_spider(host, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
-            log.info('saved spider for %s' % host)
+        return cert
+
 
 
 if __name__ == '__main__':
@@ -387,9 +417,13 @@ if __name__ == '__main__':
     c = get_config(config_file=args.config_file)
     base_dir = c['osint'].get('base_dir').format(home=path.expanduser('~'))
 
-    pool = multiprocessing.Pool(c.get('multiprocessing_pools', 1000))
-    for _, domains, other_files in scandir.walk(base_dir):
-        for domain in domains:
-            log.info('Queue %s to process' % domain)
-            pool.apply(process, args=(domain, ))
-        break
+    pool = multiprocessing.Pool(c.get('multiprocessing_pools', 1))
+    try:
+        for _, domains, other_files in scandir.walk(base_dir):
+            for domain in domains:
+                log.info('Queue %s to process' % domain)
+                pool.apply_async(process, args=(domain, ))
+            break
+    finally:
+        pool.close()
+    pool.join()
