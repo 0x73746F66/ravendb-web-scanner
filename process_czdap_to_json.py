@@ -284,7 +284,7 @@ def download(url, output_directory, access_token):
                 raise
         if local_size == file_size:
             log.info("Matched local file [%s] skipping download.." % remote_file)
-            return
+            return file_path
 
     human_size = Byte(file_size).best_prefix()
     log.info("Downloading [{size}] {uri}".format(
