@@ -1,0 +1,32 @@
+tmp_dir: /tmp/zonefiles
+shodan_api_key: abc1234abc1234abc1234abc1234abc1234abc1234
+
+ravendb:
+  proto: https
+  host: localhost
+  port: 8080
+
+czdap:
+  regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
+  authentication_base_url: https://account-api.icann.org
+  czds_base_url: https://czds-api.icann.org
+  username: abc1234
+  password: abc1234abc1234abc1234
+
+ftp:
+  - server: rzname.verisign-grs.com
+    user: abc1234
+    passwd: abc1234abc1234abc1234
+    regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
+    files:
+      - md5checksum: name.zone.gz.md5
+        file_path: name.zone.gz
+        tld: name
+  - server: rz.verisign-grs.com
+    user: abc1234
+    passwd: abc1234abc1234abc1234
+    regex: '^([a-zA-Z0-9-]+)\s+NS(\s)+([a-zA-Z0-9-\.]+).$'
+    files:
+      - md5checksum: com.zone.gz.md5
+        file_path: com.zone.gz
+        tld: com

@@ -116,6 +116,7 @@ credentials.csv
 
 # others
 vendor/
+topology_files/
 zonefiles/
 cert_dot_sh/*.csv
 cert_dot_sh/*.csv.part

@@ -1,112 +1,18 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import requests, logging, colorlog, argparse, OpenSSL, ssl, socket
-import scandir, dns, dns.resolver, json, shodan, time, urllib2, re, multiprocessing
-from functools import wraps
+import logging, OpenSSL, socket, ssl
+import scandir, dns, dns.resolver, json, shodan, time, urllib2
+
 from os import path, getcwd, isatty, makedirs
 from urlparse import urljoin, urlparse
-from yaml import load
 from datetime import datetime
 from pythonwhois import get_whois
 from pythonwhois.shared import WhoisException
 from socket import error as SocketError
 
-config = None
-session = None
-
-
-def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
-    """
-    :param ExceptionToCheck: the exception to check. may be a tuple of exceptions to check
-    :type ExceptionToCheck: Exception or tuple
-    :param tries: number of times to try (not retry) before giving up
-    :type tries: int
-    :param delay: initial delay between retries in seconds
-    :type delay: int
-    :param backoff: backoff multiplier e.g. value of 2 will double the delay each retry
-    :type backoff: int
-    :param logger: logger to use. If None, print
-    :type logger: logging.Logger instance
-    """
-
-    def deco_retry(f):
-        @wraps(f)
-        def f_retry(*args, **kwargs):
-            mtries, mdelay = tries, delay
-            while mtries > 1:
-                try:
-                    return f(*args, **kwargs)
-                except ExceptionToCheck, e:
-                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
-                    if logger:
-                        logger.warning(msg)
-                    else:
-                        print msg
-                    time.sleep(mdelay)
-                    mtries -= 1
-                    mdelay *= backoff
-                except Exception as e:
-                    logger.critical(e)
-                    break
-            return f(*args, **kwargs)
-
-        return f_retry  # true decorator
-
-    return deco_retry
-
-def get_config(config_file=None):
-    global config
-
-    if not config:
-        if not config_file:
-            config_file = path.join(path.realpath(getcwd()), 'config.yaml')
-        with open(config_file, 'r') as f:
-            config = load(f.read())
-
-    return config
-
-
-def get_session():
-    global session
-
-    if not session:
-        session = requests.Session()
-
-    return session
-
-
-def setup_logging(log_level):
-    log = logging.getLogger()
-    format_str = '%(asctime)s - %(process)d - %(levelname)-8s - %(message)s'
-    date_format = '%Y-%m-%d %H:%M:%S'
-    if isatty(2):
-        cformat = '%(log_color)s' + format_str
-        colors = {
-            'DEBUG': 'reset',
-            'INFO': 'bold_blue',
-            'WARNING': 'bold_yellow',
-            'ERROR': 'bold_red',
-            'CRITICAL': 'bold_red'
-        }
-        formatter = colorlog.ColoredFormatter( cformat, date_format, log_colors=colors)
-    else:
-        formatter = logging.Formatter(format_str, date_format)
-
-    if log_level > 0:
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        log.addHandler(stream_handler)
-    if log_level == 1:
-        log.setLevel(logging.CRITICAL)
-    if log_level == 2:
-        log.setLevel(logging.ERROR)
-    if log_level == 3:
-        log.setLevel(logging.WARN)
-    if log_level == 4:
-        log.setLevel(logging.INFO)
-    if log_level >= 5:
-        log.setLevel(logging.DEBUG)
-
+from helpers import *
+from models import *
+from czdap import *
 
 def get_certificate_detail(cert):
     x509 = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, cert)
@@ -123,7 +29,6 @@ def get_certificate_detail(cert):
     extension_data = {e.get_short_name(): str(e) for e in extensions}
     result.update(extension_data)
     return result
-
 
 def get_certificate(host, port=443, timeout=10):
     session = get_session()
@@ -247,7 +152,7 @@ def save_whois(host, whois_dir):
 
 
 def save_shodan(host, shodan_dir):
-    c = get_config(config_file=args.config_file)
+    c = get_config()
     api = shodan.Shodan(c.get('shodan_api_key'))
     if not path.exists(shodan_dir):
         makedirs(shodan_dir)
@@ -299,87 +204,8 @@ def save_spider(host, spider_dir):
             return True
 
 
-def process(fqdn):
-    c = get_config()
-    log = logging.getLogger()
-
-    base_dir = c['osint'].get('base_dir').format(home=path.expanduser('~'))
-
-    now = datetime.utcnow().replace(microsecond=0)
-    updated_date = now.strftime('%Y-%m-%d')
-    if save_whois(fqdn, whois_dir=path.join(base_dir, c['osint'].get('whois_dir').format(domain=fqdn))):
-        log.info('saved whois for %s' % fqdn)
-
-    nameservers = None
-    data_path = path.join(base_dir, fqdn, 'zonefile.json')
-    if path.isfile(data_path):
-        with open(data_path, 'r') as r:
-            file_data = json.loads(r.read())
-            if 'nameservers' in file_data:
-              nameservers = file_data['nameservers']
-    if nameservers:
-      host_ip = get_a(fqdn, nameservers=nameservers)
-      cname = get_cnames(fqdn, nameservers=nameservers),
-      mx = get_mx(fqdn, nameservers=nameservers),
-      soa = get_soa(fqdn, nameservers=nameservers),
-      txt = get_txt(fqdn, nameservers=nameservers)
-    else:
-      host_ip = get_a(fqdn)
-      cname = get_cnames(fqdn),
-      mx = get_mx(fqdn),
-      soa = get_soa(fqdn),
-      txt = get_txt(fqdn)
-
-    dns_data = {
-        'updated_date': updated_date,
-        'a': host_ip,
-        'cname': cname,
-        'mx': mx,
-        'soa': soa,
-        'txt': txt
-    }
-    dns_dir = path.join(base_dir, c['osint'].get('dns_dir').format(domain=fqdn))
-    if not path.exists(dns_dir):
-        makedirs(dns_dir)
-    file_name = path.join(dns_dir, updated_date + '.json')
-    with open(file_name, 'w+') as f:
-        log.info('saved dns data for %s' % fqdn)
-        f.write(json.dumps(dns_data, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
-
-    if host_ip and save_shodan(host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=fqdn))):
-        log.info('saved shodan for %s' % fqdn)
-
-    if save_spider(fqdn, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
-        log.info('saved spider for %s' % fqdn)
-
-    https_dir = path.join(base_dir, c['osint'].get('https_dir').format(domain=fqdn))
-    cert = save_https(fqdn, host_ip, https_dir=https_dir)
-    if not cert:
-        return
-    log.info('saved https cert detail for %s' % fqdn)
-    if not cert.has_key('subjectAltName'):
-        return
-    log.debug('found subjectAltName %s' % cert['subjectAltName'])
-    domains = set()
-    for d in cert['subjectAltName'].split(','):
-        domain = ''.join(d.split('DNS:')).strip()
-        if not d.startswith('*'):
-            domains.add(domain)
-    for domain in domains:
-        sub_domain = fqdn, domain.replace(fqdn, '').rstrip('.')
-        sub_domain_path = path.join(fqdn, sub_domain)
-        sub_host_ip = get_a(domain)
-        if save_spider(domain, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=sub_domain_path))):
-            log.info('saved spider for %s' % domain)
-        
-        if save_shodan(sub_host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=sub_domain_path))):
-            log.info('saved shodan for %s' % domain)
-        https_subdir = path.join(base_dir, c['osint'].get('https_dir').format(domain=sub_domain_path))
-        if save_https(domain, sub_host_ip, https_dir=https_subdir):
-            log.info('saved https cert detail for %s' % domain)
-
-
 def save_https(fqdn, host_ip, https_dir):
+    log = logging.getLogger()
     now = datetime.utcnow().replace(microsecond=0)
     updated_date = now.strftime('%Y-%m-%d')
     if not path.exists(https_dir):
@@ -402,28 +228,3 @@ def save_https(fqdn, host_ip, https_dir):
     with open(file_name, 'w+') as f:
         f.write(json.dumps(cert, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
         return cert
-
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='open net scans')
-    parser.add_argument('-c', '--config-file', default='config.yaml', help='absolute path to config file')
-    parser.add_argument('--verbose', '-v', action='count', default=0)
-    args = parser.parse_args()
-
-    log_level = args.verbose if args.verbose else 3
-    setup_logging(log_level)
-    log = logging.getLogger()
-    c = get_config(config_file=args.config_file)
-    base_dir = c['osint'].get('base_dir').format(home=path.expanduser('~'))
-
-    pool = multiprocessing.Pool(c.get('multiprocessing_pools', 1))
-    try:
-        for _, domains, other_files in scandir.walk(base_dir):
-            for domain in domains:
-                log.info('Queue %s to process' % domain)
-                pool.apply_async(process, args=(domain, ))
-            break
-    finally:
-        pool.close()
-    pool.join()
