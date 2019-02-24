@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
 import logging, OpenSSL, socket, ssl
-import scandir, dns, dns.resolver, json, shodan, time, urllib2
+import scandir, dns, dns.resolver, json, shodan, time
 
 from os import path, getcwd, isatty, makedirs
-from urlparse import urljoin, urlparse
+from urllib.request import urlopen
+from urllib.parse import urljoin, urlparse
 from datetime import datetime
 from pythonwhois import get_whois
 from pythonwhois.shared import WhoisException
@@ -64,7 +65,6 @@ def get_certificate(host, port=443, timeout=10):
     PEM = ssl.DER_cert_to_PEM_cert(DER)
     return PEM, r.headers
 
-
 @retry((dns.resolver.NoNameservers, dns.exception.Timeout), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
 def get_dns_record(domain, record, nameservers=None):
     resolver = dns.resolver.get_default_resolver()
@@ -82,7 +82,6 @@ def get_dns_record(domain, record, nameservers=None):
     except (dns.resolver.NoAnswer, dns.exception.SyntaxError, dns.resolver.NXDOMAIN):
         return
 
-
 def get_cnames(domain, nameservers=None):
     results = set()
     result = get_dns_record(domain, 'CNAME', nameservers=nameservers)
@@ -98,7 +97,6 @@ def get_a(domain, nameservers=None):
         for data in result:
             return data.address
     return
-
 
 def get_soa(domain, nameservers=None):
     results = []
@@ -116,7 +114,6 @@ def get_soa(domain, nameservers=None):
             })
     return results
 
-
 def get_mx(domain, nameservers=None):
     results = set()
     result = get_dns_record(domain, 'MX', nameservers=nameservers)
@@ -125,7 +122,6 @@ def get_mx(domain, nameservers=None):
             results.add(data.exchange)
     return list(results)
 
-
 def get_txt(domain, nameservers=None):
     results = set()
     result = get_dns_record(domain, 'TXT', nameservers=nameservers)
@@ -133,7 +129,6 @@ def get_txt(domain, nameservers=None):
         for data in result:
             results.add(data)
     return list(results)
-
 
 @retry(SocketError, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
 def save_whois(host, whois_dir):
@@ -149,7 +144,6 @@ def save_whois(host, whois_dir):
         f.write(
             json.dumps(r, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
     return True
-
 
 def save_shodan(host, shodan_dir):
     c = get_config()
@@ -169,7 +163,6 @@ def save_shodan(host, shodan_dir):
             json.dumps(r, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
     return True
 
-
 def save_spider(host, spider_dir):
     log = logging.getLogger()
     if not path.exists(spider_dir):
@@ -179,13 +172,13 @@ def save_spider(host, spider_dir):
     url = 'https://' + host
     log.info('Trying %s' % url)
     try:
-        website = urllib2.urlopen(url)
+        website = urlopen(url)
         html = website.read()
     except:
         url = 'http://' + host
         log.warn('Trying %s' % url)
         try:
-            website = urllib2.urlopen(url)
+            website = urlopen(url)
             html = website.read()
         except Exception as e:
             log.error('Unable to crawl %s\t%s' % (host, e))
@@ -202,7 +195,6 @@ def save_spider(host, spider_dir):
         with open(file_name, 'w+') as f:
             f.write(links)
             return True
-
 
 def save_https(fqdn, host_ip, https_dir):
     log = logging.getLogger()

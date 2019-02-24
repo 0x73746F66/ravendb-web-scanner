@@ -4,7 +4,7 @@ Open net scans
 Goals
 ------------
 
-* Get a list of all registered domains
+* Get a list of all registered domains using zonefiles
 * Check for https
     * Use the cert to learn about subdomains
 * Use OSINT tools to learn as much as we can about all the domains we find
@@ -12,40 +12,32 @@ Goals
 Important Information
 ------------
 
-Some registries allow users to download zone data directly from CZDAP, and others provide FTP credentials that you can use to login to their servers. These tools allow you to programmatically perform these two tasks:
+Some registries allow users to download zone data directly from CZDAP, and others provide FTP credentials that you can use to login to their servers. 
 
-* Download zone data directly using the CZDAP API.
-* Decrypt FTP credentials downloaded from ICANN's CZDAP application.
+Before using this repo you need to acquire credentials for:
+
+* zonefile data using the CZDAP API
+* FTP credentials for unsupported CZDAP domains (com, name)
 
 Installation
 ------------
 
-This script requires Python 2.x
+This script requires Python 3.7
 
 `pip install -r requirements.txt` for the extension libraries.
 
-Downloading zone data from CZDAP
+First steps
 ---------------------
 
-1. Visit CZDAP and copy your token. You can find it on your user profile page.
+1. Acquire credentials
 
 2. Make a copy of the `config.sample.yaml` file and name it `config.yaml`.
 
-3. Edit config.yaml and overwrite the "token" parameter with the your unique token.
+3. Edit config.yaml and overwrite the _sample_ parameters with the your unique token.
 
-4. Run `python download.py`
+4. Acquire a license for ravendb and run ravendb, a sample `ravendb-docker.sh` is there for convenience
 
-Decrypting FTP credentials
-----------------------
+Running
+---------------------
 
-To decrypt your own FTP credentials:
-
-1. Visit CZDAP and copy your token. You can find it on your user profile page, under the tab "API".
-
-2. Make a copy of the `config.sample.yaml` file and name it `config.yaml`.
-
-3. Edit config.yaml and overwrite the "token" parameter with the your unique token.
-
-2. Copy your private key into this directory and make sure it's named `czdap.private.key`.
-
-4. Run `python decrypt.py`.
+In the src folder you will find `process_*.py` and `gather_*.py` files that are run simply using the python interpreter and reads inputs from your config.yaml
