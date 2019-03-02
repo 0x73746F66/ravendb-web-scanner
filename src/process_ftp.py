@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import time, argparse, logging, json
+import time, argparse, logging, json, multiprocessing
 from os import path, isatty, getcwd, makedirs
 from datetime import datetime
 from pyravendb.store import document_store
@@ -78,23 +78,30 @@ def main():
             query_result = list(session.query(object_type=Zonefile).where(tld=zonefile.tld))
             query_result.sort(key=lambda x: x.started_at_unix, reverse=True)
             if not query_result or is_zonefile_updated(zonefile, query_result[0]):
-                log.info('Writing %s to ravendb' % zonefile)
+                log.info('Writing %s to ravendb' % zonefile.tld)
                 session.store(zonefile)
                 session.save_changes()
         log.info('Parsing %s' % zonefile_path)
-        for document in parse_file(zonefile_path, regex):
-            document['remote_file'] = remote
-            document['scanned_at'] = started_at.isoformat()
-            document['tld'] = z.get('tld')
-            document['fqdn'] = str('.'.join([document['domain'], document['tld']]))
-            domain = Domain(**document)
+        n_cpu = 12
+        p = multiprocessing.Pool()
+        p.map(save_doc, parse_file(zonefile_path, regex, {
+            'remote_file': remote,
+            'scanned_at': started_at.isoformat(),
+            'tld': z.get('tld'),
+        }), n_cpu)
+        p.close()
+        p.join()
 
-            with scans_db.open_session() as session:
-                query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
-                query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
-                if not query_result or is_domain_updated(domain, query_result[0]):
-                    session.store(domain)
-                    session.save_changes()
+
+def save_doc(document):
+    domain = Domain(**document)
+    scans_db = get_db('scans')
+    with scans_db.open_session() as session:
+        query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
+        query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
+        if not query_result or is_domain_updated(domain, query_result[0]):
+            session.store(domain)
+            session.save_changes()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
@@ -105,6 +112,12 @@ if __name__ == '__main__':
 
     log_level = args.verbose if args.verbose else 3
     setup_logging(log_level)
-    get_config(config_file=args.config_file)
+    c = get_config(config_file=args.config_file)
 
+    ravendb_conn = '{}://{}:{}'.format(
+        c['ravendb'].get('proto'),
+        c['ravendb'].get('host'),
+        c['ravendb'].get('port'),
+    )
+    get_db("scans", ravendb_conn)
     main()

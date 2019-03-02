@@ -9,4 +9,4 @@ dnspython==1.16.0
 pythonwhois==2.4.3
 shodan==1.11.0
 scandir==1.9.0
-pyravendb==4.0.6.0
+pyravendb==4.0.6.1

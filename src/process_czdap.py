@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, time, re, argparse, json
+import logging, time, re, argparse, json, multiprocessing
 from os import path, makedirs
 from datetime import datetime
 
@@ -9,8 +9,10 @@ from helpers import *
 from models import *
 from czdap import *
 
+cache = {}
 
 def main():
+    global cache
     log = logging.getLogger()
     c = get_config()
     authen_base_url = c['czdap'].get('authentication_base_url')
@@ -37,16 +39,8 @@ def main():
     if not path.exists(output_directory):
         makedirs(output_directory)
 
-    ravendb_conn = '{}://{}:{}'.format(
-        c['ravendb'].get('proto'),
-        c['ravendb'].get('host'),
-        c['ravendb'].get('port'),
-    )
-    scans_db = document_store.DocumentStore(urls=[ravendb_conn], database="scans")
-    scans_db.initialize()
-    zonefiles_db = document_store.DocumentStore(urls=[ravendb_conn], database="zonefiles")
-    zonefiles_db.initialize()
-
+    scans_db = get_db('scans')
+    zonefiles_db = get_db('zonefiles')
     for link in zone_links:
         tld = ''.join(''.join(link.split('/')[-1:]).split('.')[0])
         started_at = datetime.utcnow().replace(microsecond=0)
@@ -72,23 +66,47 @@ def main():
             query_result = list(session.query(object_type=Zonefile).where(tld=zonefile.tld))
             query_result.sort(key=lambda x: x.started_at_unix, reverse=True)
             if not query_result or is_zonefile_updated(zonefile, query_result[0]):
-                log.info('Writing %s to ravendb' % zonefile)
+                log.info('Writing %s to ravendb' % zonefile.tld)
                 session.store(zonefile)
                 session.save_changes()
-        log.info('Parsing %s' % zonefile)
-        for document in parse_file(new_dest, regex):
-            document['remote_file'] = link
-            document['scanned_at'] = started_at.isoformat()
-            document['tld'] = tld
-            document['fqdn'] = str('.'.join([document['domain'], tld]))
-            domain = Domain(**document)
+        
+        log.info('Caching %s' % zonefile.tld)
+        with scans_db.open_session() as session:
+            query_result = list(session.query(object_type=Domain).where(tld=tld))
+            for domain in query_result:
+                index_key = make_domain_key(domain)
+                cache[index_key] = domain
+        
+        log.info('Parsing %s' % zonefile.tld)
+        n_cpu = 12
+        p = multiprocessing.Pool()
+        p.map(save_doc, parse_file(new_dest, regex, {
+            'remote_file': link,
+            'scanned_at': started_at.isoformat(),
+            'tld': tld,
+        }), n_cpu)
+        p.close()
+        p.join()
 
-            with scans_db.open_session() as session:
-                query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
-                query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
-                if not query_result or is_domain_updated(domain, query_result[0]):
-                    session.store(domain)
-                    session.save_changes()
+def save_doc(document):
+    global cache
+    domain = Domain(**document)
+    scans_db = get_db('scans')
+    index_key = make_domain_key(domain)
+    with scans_db.open_session() as session:
+        if index_key in cache and is_domain_updated(domain, cache[index_key]):
+            session.store(domain)
+            session.save_changes()
+            return
+        query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
+        query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
+        if not query_result or is_domain_updated(domain, query_result[0]):
+            session.store(domain)
+            session.save_changes()
+
+def make_domain_key(domain):
+    return '{}/{}'.format(domain.fqdn,domain.nameserver)
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
@@ -98,7 +116,13 @@ if __name__ == '__main__':
 
     log_level = args.verbose if args.verbose else 3
     setup_logging(log_level)
-    get_config(config_file=args.config_file)
-
+    c = get_config(config_file=args.config_file)
+    ravendb_conn = '{}://{}:{}'.format(
+        c['ravendb'].get('proto'),
+        c['ravendb'].get('host'),
+        c['ravendb'].get('port'),
+    )
+    get_db("scans", ravendb_conn)
+    get_db("zonefiles", ravendb_conn)
     main()
 

@@ -2,14 +2,14 @@
 
 mkdir -p /mnt/ravendb/mnt/ravendb/data /mnt/ravendb/config /mnt/ravendb/backup
 
-# /mnt/ravendb/config/settings.json                                              ✔  51% hdd   50.06G RAM  4.81 L
+# /mnt/ravendb/config/settings.json
 # {
 #     "ServerUrl": "http://127.0.0.1:8080",
 #     "Setup.Mode": "Initial",
 #     "Server.LocalRootPath": "/opt/RavenDB/Backup"
 # }
 
-# /mnt/ravendb/config/license.json                                               ✔  51% hdd   50.04G RAM  4.84 L
+# /mnt/ravendb/config/license.json
 
 
 docker run -d --rm --name ravendb \

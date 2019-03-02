@@ -3,7 +3,9 @@ from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
 from ftplib import FTP
+from pyravendb.store import document_store
 
+db = {}
 config = None
 session = None
 
@@ -65,6 +67,22 @@ def get_config(config_file=None):
 
     return config
 
+def get_db(database, ravendb_conn=None):
+    global db
+
+    if not db and not ravendb_conn:
+        print('ravendb_conn missing')
+        exit(0)
+    if not database in db and not ravendb_conn:
+        print('ravendb_conn missing')
+        exit(0)
+
+    if not database in db:
+        db[database] = document_store.DocumentStore(urls=[ravendb_conn], database=database)
+        db[database].initialize()
+
+    return db[database]
+
 def setup_logging(log_level):
     log = logging.getLogger()
     format_str = '%(asctime)s - %(process)d - %(levelname)-8s - %(message)s'
@@ -105,7 +123,7 @@ def decompress(file_path, new_dest):
             shutil.copyfileobj(f_in, f_out)
     return new_dest
 
-def parse_file(zonefile_path, regex):
+def parse_file(zonefile_path, regex, document):
     c = get_config()
     log = logging.getLogger()
     DEFAULT_NS_TTL = 86400
@@ -127,13 +145,14 @@ def parse_file(zonefile_path, regex):
                 ttl = ttl.strip()
             if not ttl.strip():
                 ttl = DEFAULT_NS_TTL
-
-            yield {
+            d = {
                 'domain': domain,
                 'local_file': zonefile_path,
                 'nameserver': ns,
                 'ttl': ttl
             }
+            d['fqdn'] = str('.'.join([d['domain'], document['tld']]))
+            yield {**document, **d}
 
 @retry(Exception, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):
