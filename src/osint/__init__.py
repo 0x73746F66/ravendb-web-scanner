@@ -131,19 +131,6 @@ def get_txt(domain, nameservers=None):
     return list(results)
 
 @retry(SocketError, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
-def save_whois(host, whois_dir):
-    if not path.exists(whois_dir):
-        makedirs(whois_dir)
-    try:
-        r = get_whois(host)
-    except (WhoisException):
-        return
-    updated_date = datetime.utcnow().strftime('%Y-%m-%d')
-    file_name = path.join(whois_dir, updated_date + '.json')
-    with open(file_name, 'w+') as f:
-        f.write(
-            json.dumps(r, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
-    return True
 
 def save_shodan(host, shodan_dir):
     c = get_config()
