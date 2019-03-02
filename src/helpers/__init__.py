@@ -1,9 +1,11 @@
-import hashlib, time, requests, logging, colorlog, gzip, shutil, re
+import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap
 from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
 from ftplib import FTP
 from pyravendb.store import document_store
+from bitmath import Byte
+from progressbar import ProgressBar
 
 db = {}
 config = None
@@ -124,7 +126,6 @@ def decompress(file_path, new_dest):
     return new_dest
 
 def parse_file(zonefile_path, regex, document):
-    c = get_config()
     log = logging.getLogger()
     DEFAULT_NS_TTL = 86400
 
@@ -132,27 +133,24 @@ def parse_file(zonefile_path, regex, document):
         log.error('missing zonefile %s' % zonefile_path)
         return
 
+    pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
     with open(zonefile_path, 'r') as f:
-        for line in f:
-            try:
-                domain, ttl, ns = re.search(regex, line).groups()
-            except:
-                log.debug('No match found for line\n%s' % line)
-                continue
-            ns = ns.lower()
-            domain = domain.lower()
-            if ttl:
-                ttl = ttl.strip()
-            if not ttl.strip():
-                ttl = DEFAULT_NS_TTL
-            d = {
-                'domain': domain,
-                'local_file': zonefile_path,
-                'nameserver': ns,
-                'ttl': ttl
-            }
-            d['fqdn'] = str('.'.join([d['domain'], document['tld']]))
-            yield {**document, **d}
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            for domain, ttl, ns in pattern.findall(m):
+                ns = ns.lower()
+                domain = domain.lower()
+                if ttl:
+                    ttl = ttl.strip()
+                if not ttl.strip():
+                    ttl = DEFAULT_NS_TTL
+                d = {
+                    'domain': str(domain),
+                    'local_file': zonefile_path,
+                    'nameserver': str(ns),
+                    'ttl': int(ttl)
+                }
+                d['fqdn'] = str('.'.join([d['domain'], document['tld']]))
+                yield {**document, **d}
 
 @retry(Exception, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):
@@ -164,9 +162,17 @@ def ftp_session(server, user, passwd, use_pasv=True):
 
 def ftp_download(ftp, remote_source, local_filename):
     log = logging.getLogger()
-    log.info('downloading to %s' % local_filename)
+    filesize = ftp_filesize(ftp, remote_source)
+    human_size = Byte(filesize).best_prefix()
+    log.info('downloading %s to %s' % (human_size, local_filename))
+    progress = ProgressBar(maxval=filesize)
     with open(local_filename, 'wb') as f:
-        ftp.retrbinary('RETR %s' % remote_source, lambda data: f.write(data))
+        def download_file(chunk):
+            f.write(chunk)
+            progress.update(len(chunk))
+        progress.start()
+        ftp.retrbinary('RETR %s' % remote_source, download_file)
+    progress.finish()
     return local_filename
 
 def ftp_filesize(ftp, filename):

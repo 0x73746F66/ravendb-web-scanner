@@ -46,9 +46,6 @@ def main():
                 zonefile_path = path.join(zonefile_dir, target_file.replace('.gz', '.txt', 1))
                 download_zonefile = True
                 if path.isfile(target_file_path):
-                    target_size = ftp_filesize(ftp, target_file)
-                    human_size = Byte(target_size).best_prefix()
-                    log.warn('%s is %s' % (target_file, human_size))
                     if md5_checksum(md5_file_path, target_file_path):
                         log.info('file %s matches checksum. skipping' % target_file)
                         download_zonefile = False
