@@ -66,7 +66,7 @@ def get_certificate(host, port=443, timeout=10):
     return PEM, r.headers
 
 @retry((dns.resolver.NoNameservers, dns.exception.Timeout), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
-def get_dns_record(domain, record, nameservers=None):
+def get_dns_record(domain, record, nameservers=[]):
     resolver = dns.resolver.get_default_resolver()
     ns_a = resolver.nameservers
     default_nameservers = [
@@ -82,56 +82,55 @@ def get_dns_record(domain, record, nameservers=None):
     except (dns.resolver.NoAnswer, dns.exception.SyntaxError, dns.resolver.NXDOMAIN):
         return
 
-def get_cnames(domain, nameservers=None):
+def get_cnames(domain, nameservers=[]):
     results = set()
     result = get_dns_record(domain, 'CNAME', nameservers=nameservers)
     if result:
         for data in result:
-            results.add(data.target)
+            results.add(str(data.target))
     return list(results)
 
 
-def get_a(domain, nameservers=None):
+def get_a(domain, nameservers=[]):
     result = get_dns_record(domain, 'A', nameservers=nameservers)
     if result:
         for data in result:
             return data.address
     return
 
-def get_soa(domain, nameservers=None):
+def get_soa(domain, nameservers=[]):
     results = []
     result = get_dns_record(domain, 'SOA', nameservers=nameservers)
     if result:
         for rdata in result:
             results.append({
-                'serial': rdata.serial,
-                'tech': rdata.rname,
-                'refresh': rdata.refresh,
-                'retry': rdata.retry,
-                'expire': rdata.expire,
-                'minimum': rdata.minimum,
-                'mname': rdata.mname
+                'serial': int(rdata.serial),
+                'tech': str(rdata.rname),
+                'refresh': int(rdata.refresh),
+                'retry': int(rdata.retry),
+                'expire': int(rdata.expire),
+                'minimum': int(rdata.minimum),
+                'mname': str(rdata.mname)
             })
     return results
 
-def get_mx(domain, nameservers=None):
+def get_mx(domain, nameservers=[]):
     results = set()
     result = get_dns_record(domain, 'MX', nameservers=nameservers)
     if result:
         for data in result:
-            results.add(data.exchange)
+            results.add(str(data.exchange))
     return list(results)
 
-def get_txt(domain, nameservers=None):
+def get_txt(domain, nameservers=[]):
     results = set()
     result = get_dns_record(domain, 'TXT', nameservers=nameservers)
     if result:
         for data in result:
-            results.add(data)
+            results.add(str(data))
     return list(results)
 
 @retry(SocketError, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
-
 def save_shodan(host, shodan_dir):
     c = get_config()
     api = shodan.Shodan(c.get('shodan_api_key'))

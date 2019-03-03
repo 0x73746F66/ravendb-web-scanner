@@ -10,59 +10,70 @@ from osint import *
 
 def process_dns(domain):
     log = logging.getLogger()
-    dns_db = get_db("dns")
+    osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
 
-    host_ip = get_a(domain)
-    cname = get_cnames(domain),
-    mx = get_mx(domain),
-    soa = get_soa(domain),
-    txt = get_txt(domain)
+    host_ip = get_a(domain.fqdn)
+    cname = get_cnames(domain.fqdn)
+    mx = get_mx(domain.fqdn)
+    soa = []
+    for s in get_soa(domain.fqdn):
+        soa.append(SOA(**s))
+    txt = get_txt(domain.fqdn)
 
-    dns = DNS(domain, host_ip, cname, mx, soa, txt, scanned_at)
-    print(dns)
-    exit(0)
-    return dns
+    dns = DnsQuery(
+        domain=domain.fqdn,
+        A=host_ip or None,
+        CNAME=None if not cname else '|'.join(sorted(cname)),
+        MX=None if not mx else '|'.join(sorted(mx)),
+        SOA=soa or None,
+        TXT=None if not txt else '|'.join(sorted(txt)),
+        scanned_at=scanned_at
+    )
+    with osint_db.open_session() as session:
+        query_result = list(session.query(object_type=DnsQuery).where(domain=domain.fqdn).order_by_descending('scanned_at_unix'))
+        if not query_result or is_dns_updated(dns, query_result[0]):
+            log.info('Saving dns query for %s' % domain.fqdn)
+            session.store(dns)
+            session.save_changes()
+            return dns
 
+@retry((WhoisException), tries=5, delay=1, backoff=3, logger=logging.getLogger())
 def process_whois(domain):
     log = logging.getLogger()
-    whois_db = get_db("whois")
+    osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
     try:
         r = get_whois(domain.fqdn, normalized=True)
-        print(r['emails'])
-        print(type(r['emails']))
-        exit(0)
         whois = Whois(
-            r['id'],
-            domain.fqdn,
-            r['status'],
-            r['registrar'],
-            ','.join(r['emails'].sort()),
-            r['whois_server'],
-            r['contacts']['billing'],
-            r['contacts']['admin'],
-            r['contacts']['tech'],
-            r['contacts']['registrant'],
-            r['creation_date'][0].isoformat(),
-            r['expiration_date'][0].isoformat(),
-            r['updated_date'][0].isoformat(),
-            scanned_at
+            id=','.join(sorted(r['id'])),
+            domain=domain.fqdn,
+            status=','.join(sorted(r['status'])),
+            registrar=','.join(sorted(r['registrar'])),
+            emails=None if not 'emails' in r else ','.join(sorted(r['emails'])),
+            whois_server=None if not 'whois_server' in r else ','.join(sorted(r['whois_server'])),
+            contact_billing=r['contacts']['billing'],
+            contact_admin=r['contacts']['admin'],
+            contact_tech=r['contacts']['tech'],
+            contact_registrant=r['contacts']['registrant'],
+            creation_date=None if not 'creation_date' in r else r['creation_date'][0].isoformat(),
+            expiration_date=None if not 'expiration_date' in r else r['expiration_date'][0].isoformat(),
+            updated_date=None if not 'updated_date' in r else r['updated_date'][0].isoformat(),
+            scanned_at=scanned_at
         )
-        with whois_db.open_session() as session:
+        with osint_db.open_session() as session:
             query_result = list(session.query(object_type=Whois).where(domain=domain.fqdn).order_by_descending('scanned_at_unix'))
             if not query_result or is_whois_updated(whois, query_result[0]):
+                log.info('Saving whois %s' % domain.fqdn)
                 session.store(whois)
                 session.save_changes()
                 return whois
     except WhoisException as e:
         log.error(e)
-        if r:
-            print(r)
-
-
+        if 'No root WHOIS server found' not in str(e):
+            raise Exception(e)
 
 #     if host_ip and save_shodan(host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=fqdn))):
 #         log.info('saved shodan for %s' % fqdn)
@@ -114,15 +125,18 @@ if __name__ == '__main__':
         c['ravendb'].get('host'),
         c['ravendb'].get('port'),
     )
-    scans_db = get_db("scans", ravendb_conn)
-    get_db("whois", ravendb_conn)
-    get_db("dns", ravendb_conn)
-
-    with scans_db.open_session() as session:
-        query_result = list(session.query(object_type=Domain).order_by_descending('started_at_unix'))
-    if not query_result:
-        log.info('Nothing to do')
-        exit(0)
-    for domain in query_result:
-        process_whois(domain)
-        process_dns(domain)
+    zonefiles_db = get_db("zonefiles", ravendb_conn)
+    get_db("osint", ravendb_conn)
+    zonefiles = []
+    with zonefiles_db.open_session() as session:
+        zonefiles = list(session.query(object_type=Zonefile).order_by('started_at_unix'))
+    for zonefile in zonefiles:
+        log.info('Gathering [.%s] domains' % zonefile.tld)
+        with zonefiles_db.open_session() as session:
+            query_result = list(session.query(object_type=Domain).where(tld=zonefile.tld).order_by('saved_at_unix'))
+            if not query_result:
+                log.info('Nothing to do')
+                continue
+            for domain in query_result:
+                process_whois(domain)
+                process_dns(domain)
