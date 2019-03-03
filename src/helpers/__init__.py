@@ -3,11 +3,12 @@ from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
 from ftplib import FTP
-from pyravendb.store import document_store
 from bitmath import Byte
 from progressbar import ProgressBar
+from datetime import datetime
 
-db = {}
+from models import get_db, Domain, is_domain_updated
+
 config = None
 session = None
 
@@ -69,22 +70,6 @@ def get_config(config_file=None):
 
     return config
 
-def get_db(database, ravendb_conn=None):
-    global db
-
-    if not db and not ravendb_conn:
-        print('ravendb_conn missing')
-        exit(0)
-    if not database in db and not ravendb_conn:
-        print('ravendb_conn missing')
-        exit(0)
-
-    if not database in db:
-        db[database] = document_store.DocumentStore(urls=[ravendb_conn], database=database)
-        db[database].initialize()
-
-    return db[database]
-
 def setup_logging(log_level):
     log = logging.getLogger()
     format_str = '%(asctime)s - %(process)d - %(levelname)-8s - %(message)s'
@@ -125,10 +110,8 @@ def decompress(file_path, new_dest):
             shutil.copyfileobj(f_in, f_out)
     return new_dest
 
-def parse_file(zonefile_path, regex, document):
+def parse_file(zonefile_path, regex, document={}):
     log = logging.getLogger()
-    DEFAULT_NS_TTL = 86400
-
     if not path.isfile(zonefile_path):
         log.error('missing zonefile %s' % zonefile_path)
         return
@@ -137,20 +120,27 @@ def parse_file(zonefile_path, regex, document):
     with open(zonefile_path, 'r') as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
             for domain, ttl, ns in pattern.findall(m):
-                ns = ns.lower()
-                domain = domain.lower()
-                if ttl:
-                    ttl = ttl.strip()
-                if not ttl.strip():
-                    ttl = DEFAULT_NS_TTL
                 d = {
-                    'domain': str(domain),
+                    'saved_at': datetime.utcnow().replace(microsecond=0).isoformat(),
+                    'fqdn': '%s.%s' % (domain.decode('utf-8'), document['tld']),
+                    'domain': domain.decode('utf-8'),
                     'local_file': zonefile_path,
-                    'nameserver': str(ns),
+                    'nameserver': ns.decode('utf-8').lower(),
                     'ttl': int(ttl)
                 }
-                d['fqdn'] = str('.'.join([d['domain'], document['tld']]))
                 yield {**document, **d}
+
+def save_zonefiles_document(document):
+    log = logging.getLogger()
+    domain = Domain(**document)
+    zonefiles_db = get_db('zonefiles')
+    with zonefiles_db.open_session() as session:
+        query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
+        query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
+        if not query_result or is_domain_updated(domain, query_result[0]):
+            log.info('Saving %s' % domain.fqdn)
+            session.store(domain)
+            session.save_changes()
 
 @retry(Exception, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):

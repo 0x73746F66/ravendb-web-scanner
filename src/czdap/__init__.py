@@ -73,10 +73,10 @@ def download(url, output_directory, access_token):
     log = logging.getLogger()
     local_files = get_local_files(output_directory)
     remote_file, file_size = get_remote_stat(url, access_token)
+    file_path = '{0}/{1}'.format(output_directory, remote_file)
     if not remote_file:
         log.error("Could not check remote file [%s] cancelling download.." % url)
-        return
-    file_path = '{0}/{1}'.format(output_directory, remote_file)
+        return file_path, False
     if remote_file in local_files:
         try:
             local_size = path.getsize(file_path)
@@ -87,7 +87,7 @@ def download(url, output_directory, access_token):
                 raise
         if local_size == file_size:
             log.info("Matched local file [%s] skipping download.." % remote_file)
-            return file_path
+            return file_path, False
 
     human_size = Byte(file_size).best_prefix()
     log.info("Downloading [{size}] {uri}".format(
@@ -103,7 +103,7 @@ def download(url, output_directory, access_token):
                 f.write(chunk)
 
         log.info("Completed downloading zone to file %s" % file_path)
-
+        return file_path, True
     elif status_code == 401:
         log.info("The access_token has been expired")
         c = get_config()
@@ -117,4 +117,4 @@ def download(url, output_directory, access_token):
     else:
         log.error('Failed to download zone from {0} with code {1}'.format(url, status_code))
 
-    return file_path
+    return file_path, False

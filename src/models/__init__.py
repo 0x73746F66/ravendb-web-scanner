@@ -1,5 +1,8 @@
 import time
 from datetime import datetime
+from pyravendb.store import document_store
+
+db = {}
 
 def is_domain_updated(new, old):
     if new.ttl != old.ttl:
@@ -42,14 +45,50 @@ def is_whois_updated(new, old):
         return True
     if new.contact_billing != old.contact_billing:
         return True
-    if new.expiration_date_unix != old.expiration_date_unix:
+    if hasattr(new, 'expiration_date_unix') and hasattr(old, 'expiration_date_unix') and new.expiration_date_unix != old.expiration_date_unix:
         return True
-    if new.updated_date_unix != old.updated_date_unix:
+    if hasattr(new, 'expiration_date_unix') and not hasattr(old, 'expiration_date_unix'):
+        return True
+    if hasattr(new, 'updated_date_unix') and hasattr(old, 'updated_date_unix') and new.updated_date_unix != old.updated_date_unix:
+        return True
+    if hasattr(new, 'updated_date_unix') and not hasattr(old, 'updated_date_unix'):
         return True
     return False
 
+def is_dns_updated(new, old):
+    if new.A != old.A:
+            return True
+    if new.CNAME != old.CNAME:
+        return True
+    if new.MX != old.MX:
+        return True
+    if new.TXT != old.TXT:
+        return True
+    if old.SOA and new.SOA:
+        o_matched = []
+        n_dict = {}
+        o_dict = {}
+        for nSOA in new.SOA:
+            n_dict[nSOA.serial] = nSOA
+            for oSOA in old.SOA:
+                o_dict[oSOA.serial] = oSOA
+                if nSOA.serial == oSOA.serial:
+                    o_matched.append(oSOA.serial)
+
+        for n in new.SOA:
+            if n.serial not in o_matched:
+                return True
+            elif n_dict[n.serial].__dict__ != o_dict[n.serial].__dict__:
+                return True
+    elif old.SOA and not new.SOA:
+        return True
+    elif not old.SOA and new.SOA:
+        return True
+
+    return False
+
 class Domain(object):
-    def __init__(self, domain, tld, fqdn, ttl, nameserver, scanned_at, remote_file = None, local_file = None):
+    def __init__(self, domain, tld, fqdn, ttl, nameserver, scanned_at, saved_at = None, remote_file = None, local_file = None):
         self.domain = domain
         self.tld = tld
         self.fqdn = fqdn
@@ -58,14 +97,19 @@ class Domain(object):
         self.scanned_at = scanned_at
         scanned_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
         self.scanned_at_unix = time.mktime(scanned_dt.timetuple())
+        if saved_at:
+            self.saved_at = saved_at
+            saved_at_dt = datetime.strptime(saved_at, '%Y-%m-%dT%H:%M:%S')
+            self.saved_at_unix = time.mktime(saved_at_dt.timetuple())
         self.local_file = local_file
         self.remote_file = remote_file
     def __repr__(self):
         return self.__dict__
 
 class Zonefile(object):
-    def __init__(self, tld, started_at, downloaded_at, decompressed_at, remote_path, local_file, local_file_size, local_compressed_file = None, local_compressed_file_size = None):
+    def __init__(self, tld, source, started_at, downloaded_at, decompressed_at, remote_path, local_file, local_file_size, local_compressed_file = None, local_compressed_file_size = None):
         self.tld = tld
+        self.source = source
         self.started_at = started_at
         started_dt = datetime.strptime(started_at, '%Y-%m-%dT%H:%M:%S')
         self.downloaded_at = downloaded_at
@@ -96,21 +140,24 @@ class Whois(object):
         self.contact_admin = contact_admin
         self.contact_billing = contact_billing
         self.creation_date = creation_date
-        creation_date_dt = datetime.strptime(creation_date, '%Y-%m-%dT%H:%M:%S')
-        self.creation_date_unix = time.mktime(creation_date_dt.timetuple())
+        if creation_date:
+            creation_date_dt = datetime.strptime(creation_date, '%Y-%m-%dT%H:%M:%S')
+            self.creation_date_unix = time.mktime(creation_date_dt.timetuple())
         self.expiration_date = expiration_date
-        expiration_date_dt = datetime.strptime(expiration_date, '%Y-%m-%dT%H:%M:%S')
-        self.expiration_date_unix = time.mktime(expiration_date_dt.timetuple())
+        if expiration_date:
+            expiration_date_dt = datetime.strptime(expiration_date, '%Y-%m-%dT%H:%M:%S')
+            self.expiration_date_unix = time.mktime(expiration_date_dt.timetuple())
         self.updated_date = updated_date
-        updated_date_dt = datetime.strptime(updated_date, '%Y-%m-%dT%H:%M:%S')
-        self.updated_date_unix = time.mktime(updated_date_dt.timetuple())
+        if updated_date:
+            updated_date_dt = datetime.strptime(updated_date, '%Y-%m-%dT%H:%M:%S')
+            self.updated_date_unix = time.mktime(updated_date_dt.timetuple())
         self.scanned_at = scanned_at
         scanned_at_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
         self.scanned_at_unix = time.mktime(scanned_at_dt.timetuple())
     def __repr__(self):
         return self.__dict__
 
-class DNS(object):
+class DnsQuery(object):
     def __init__(self, domain, A, CNAME, MX, SOA, TXT, scanned_at):
         self.domain = domain
         self.A = A
@@ -123,3 +170,42 @@ class DNS(object):
         self.scanned_at_unix = time.mktime(scanned_at_dt.timetuple())
     def __repr__(self):
         return self.__dict__
+
+class SOA(object):
+    def __init__(self, serial, tech, refresh, retry, expire, minimum, mname):
+        self.serial = serial
+        self.tech = tech
+        self.refresh = refresh
+        self.retry = retry
+        self.expire = expire
+        self.minimum = minimum
+        self.mname = mname
+    def __repr__(self):
+        return self.__dict__
+
+def get_dns_query(key, value):
+    if not value:
+        return None
+    if key == "SOA":
+        soa = []
+        for v in value:
+            soa.append(SOA(**v))
+        return soa
+
+def get_db(database, ravendb_conn=None):
+    global db
+
+    if not db and not ravendb_conn:
+        print('ravendb_conn missing')
+        exit(0)
+    if not database in db and not ravendb_conn:
+        print('ravendb_conn missing')
+        exit(0)
+
+    if not database in db:
+        db[database] = document_store.DocumentStore(urls=[ravendb_conn], database=database)
+        if database == 'osint':
+            db[database].conventions.mappers.update({DnsQuery: get_dns_query})
+        db[database].initialize()
+
+    return db[database]

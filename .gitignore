@@ -113,6 +113,7 @@ config.yaml
 credentials.json
 credentials.csv
 **/*.db
+.vscode-upload.json
 
 # others
 vendor/

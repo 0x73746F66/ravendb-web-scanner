@@ -14,8 +14,8 @@ mkdir -p /mnt/ravendb/mnt/ravendb/data /mnt/ravendb/config /mnt/ravendb/backup
 # }
 
 docker run -d --name ravendb \
-    --network="host" \
-    --add-host ravendb.langton.cloud:10.1.1.127 \
+    -p "8080:8080" \
+    -p "38888:38888" \
     -e RAVEN_ServerUrl_Tcp=38888 \
     -e RAVEN_Setup_Mode='None' \
     -e RAVEN_Security_UnsecuredAccessAllowed='PrivateNetwork' \

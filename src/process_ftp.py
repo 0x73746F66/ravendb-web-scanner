@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-import time, argparse, logging, json, multiprocessing
+import time, argparse, logging, json, multiprocessing, gc
 from os import path, isatty, getcwd, makedirs
 from datetime import datetime
-from pyravendb.store import document_store
 
 from helpers import *
 from models import *
@@ -13,18 +12,8 @@ def main():
     log = logging.getLogger()
     conf = get_config()
     zonefile_dir = conf.get('tmp_dir')
-    if not path.isdir(zonefile_dir):
+    if not path.exists(zonefile_dir):
         makedirs(zonefile_dir)
-
-    ravendb_conn = '{}://{}:{}'.format(
-        conf['ravendb'].get('proto'),
-        conf['ravendb'].get('host'),
-        conf['ravendb'].get('port'),
-    )
-    scans_db = document_store.DocumentStore(urls=[ravendb_conn], database="scans")
-    scans_db.initialize()
-    zonefiles_db = document_store.DocumentStore(urls=[ravendb_conn], database="zonefiles")
-    zonefiles_db.initialize()
 
     for c in conf.get('ftp'):
         started_at = datetime.utcnow().replace(microsecond=0)
@@ -32,73 +21,62 @@ def main():
         user = c.get('user')
         passwd = c.get('passwd')
         regex = c.get('regex')
-        ftp = ftp_session(server, user, passwd)
-        try:
-            if not c.get('files'):
-                log.critical('files array needed in ftp conf')
-                exit(1)
-            for z in c.get('files'):
-                md5hash_file = z.get('md5checksum')
-                md5_file_path = path.join(zonefile_dir, md5hash_file)
-                ftp_download(ftp, md5hash_file, md5_file_path)
-                target_file = z.get('file_path')
-                target_file_path = path.join(zonefile_dir, target_file)
-                zonefile_path = path.join(zonefile_dir, target_file.replace('.gz', '.txt', 1))
-                download_zonefile = True
-                if path.isfile(target_file_path):
-                    if md5_checksum(md5_file_path, target_file_path):
-                        log.info('file %s matches checksum. skipping' % target_file)
-                        download_zonefile = False
+        if not c.get('files'):
+            log.critical('files array needed in ftp conf')
+            exit(1)
+        for z in c.get('files'):
+            ftp = ftp_session(server, user, passwd)
+            md5hash_file = z.get('md5checksum')
+            md5_file_path = path.join(zonefile_dir, md5hash_file)
+            ftp_download(ftp, md5hash_file, md5_file_path)
+            local_compressed_file = path.join(zonefile_dir, z.get('file_path'))
+            local_file = local_compressed_file.replace('.gz', '.txt', 1)
+            download_zonefile = True
+            if path.isfile(local_compressed_file):
+                if md5_checksum(md5_file_path, local_compressed_file):
+                    log.info('file %s matches checksum. skipping' % z.get('file_path'))
+                    download_zonefile = False
 
-                if download_zonefile and ftp_download(ftp, target_file, target_file_path):
-                    log.info('Download %s complete' % target_file)
-        finally:
+            if download_zonefile and ftp_download(ftp, z.get('file_path'), local_compressed_file):
+                log.info('Download %s complete' % z.get('file_path'))
+            downloaded_at = datetime.utcnow().replace(microsecond=0)
             ftp.quit()
-
-        downloaded_at = datetime.utcnow().replace(microsecond=0)
-        log.info('Decompressing %s' % target_file)
-        decompress(target_file_path, zonefile_path)
-        decompressed_at = datetime.utcnow().replace(microsecond=0)
-        remote = 'ftp://' + user + '@' + path.join(server, target_file)
-        zonefile = Zonefile(
-            z.get('tld'),
-            started_at.isoformat(),
-            downloaded_at.isoformat(),
-            decompressed_at.isoformat(),
-            remote, 
-            zonefile_path,
-            path.getsize(zonefile_path),
-            target_file_path, 
-            path.getsize(target_file_path),
-        )
-        with zonefiles_db.open_session() as session:
-            query_result = list(session.query(object_type=Zonefile).where(tld=zonefile.tld))
-            query_result.sort(key=lambda x: x.started_at_unix, reverse=True)
-            if not query_result or is_zonefile_updated(zonefile, query_result[0]):
-                log.info('Writing %s to ravendb' % zonefile.tld)
-                session.store(zonefile)
-                session.save_changes()
-        log.info('Parsing %s' % zonefile_path)
-        n_cpu = 12
-        p = multiprocessing.Pool()
-        p.map(save_doc, parse_file(zonefile_path, regex, {
-            'remote_file': remote,
-            'scanned_at': started_at.isoformat(),
-            'tld': z.get('tld'),
-        }), n_cpu)
-        p.close()
-        p.join()
-
-
-def save_doc(document):
-    domain = Domain(**document)
-    scans_db = get_db('scans')
-    with scans_db.open_session() as session:
-        query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
-        query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
-        if not query_result or is_domain_updated(domain, query_result[0]):
-            session.store(domain)
-            session.save_changes()
+            log.info('Decompressing %s' % local_compressed_file)
+            decompress(local_compressed_file, local_file)
+            decompressed_at = datetime.utcnow().replace(microsecond=0)
+            remote_path = 'ftp://' + user + '@' + path.join(server, z.get('file_path'))
+            zonefile = Zonefile(
+                tld=z.get('tld'),
+                source=c.get('server'),
+                started_at=started_at.isoformat(),
+                downloaded_at=downloaded_at.isoformat(),
+                decompressed_at=decompressed_at.isoformat(),
+                remote_path=remote_path, 
+                local_compressed_file=local_compressed_file,
+                local_compressed_file_size=path.getsize(local_compressed_file),
+                local_file=local_file, 
+                local_file_size=path.getsize(local_file),
+            )
+            zonefiles_db = get_db("zonefiles")
+            with zonefiles_db.open_session() as session:
+                query_result = list(session.query(object_type=Zonefile).where(tld=zonefile.tld))
+                query_result.sort(key=lambda x: x.started_at_unix, reverse=True)
+                if not query_result or is_zonefile_updated(zonefile, query_result[0]):
+                    log.info('Writing %s to ravendb' % zonefile.tld)
+                    session.store(zonefile)
+                    session.save_changes()
+            del zonefiles_db, zonefile, decompressed_at, downloaded_at, ftp
+            gc.collect()
+            log.info('Parsing %s' % local_file)
+            n_cpu = 3
+            p = multiprocessing.Pool()
+            p.map(save_zonefiles_document, parse_file(local_file, regex, {
+                'remote_file': remote_path,
+                'scanned_at': started_at.isoformat(),
+                'tld': z.get('tld'),
+            }), n_cpu)
+            p.close()
+            p.join()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
@@ -116,5 +94,6 @@ if __name__ == '__main__':
         c['ravendb'].get('host'),
         c['ravendb'].get('port'),
     )
-    get_db("scans", ravendb_conn)
+    get_db("zonefiles", ravendb_conn)
+    del parser, args, log_level, c, ravendb_conn
     main()
