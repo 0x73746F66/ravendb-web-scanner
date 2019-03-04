@@ -89,18 +89,17 @@ def is_dns_updated(new, old):
 
 class Domain(object):
     def __init__(self, domain, tld, fqdn, ttl, nameserver, scanned_at, saved_at = None, remote_file = None, local_file = None):
-        self.domain = domain
-        self.tld = tld
-        self.fqdn = fqdn
+        self.domain = domain.lower()
+        self.tld = tld.lower()
+        self.fqdn = fqdn.lower()
         self.ttl = ttl
-        self.nameserver = nameserver
+        self.nameserver = nameserver.lower()
         self.scanned_at = scanned_at
         scanned_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
         self.scanned_at_unix = time.mktime(scanned_dt.timetuple())
-        if saved_at:
-            self.saved_at = saved_at
-            saved_at_dt = datetime.strptime(saved_at, '%Y-%m-%dT%H:%M:%S')
-            self.saved_at_unix = time.mktime(saved_at_dt.timetuple())
+        self.saved_at = saved_at
+        saved_at_dt = datetime.strptime(saved_at, '%Y-%m-%dT%H:%M:%S')
+        self.saved_at_unix = time.mktime(saved_at_dt.timetuple())
         self.local_file = local_file
         self.remote_file = remote_file
     def __repr__(self):
@@ -108,7 +107,7 @@ class Domain(object):
 
 class Zonefile(object):
     def __init__(self, tld, source, started_at, downloaded_at, decompressed_at, remote_path, local_file, local_file_size, local_compressed_file = None, local_compressed_file_size = None):
-        self.tld = tld
+        self.tld = tld.lower()
         self.source = source
         self.started_at = started_at
         started_dt = datetime.strptime(started_at, '%Y-%m-%dT%H:%M:%S')
@@ -130,7 +129,7 @@ class Zonefile(object):
 class Whois(object):
     def __init__(self, id, domain, status, registrar, emails, whois_server, contact_billing, contact_admin, contact_tech, contact_registrant, creation_date, expiration_date, updated_date, scanned_at):
         self.id = id
-        self.domain = domain
+        self.domain = domain.lower()
         self.status = status
         self.registrar = registrar
         self.whois_server = whois_server
@@ -159,7 +158,7 @@ class Whois(object):
 
 class DnsQuery(object):
     def __init__(self, domain, A, CNAME, MX, SOA, TXT, scanned_at):
-        self.domain = domain
+        self.domain = domain.lower()
         self.A = A
         self.CNAME = CNAME
         self.MX = MX
@@ -182,6 +181,27 @@ class SOA(object):
         self.mname = mname
     def __repr__(self):
         return self.__dict__
+
+class Certificate(object):
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            if isinstance(value, datetime):
+                setattr(self, key, value.isoformat())
+            else:
+                setattr(self, key, str(value))
+    def __repr__(self):
+        return self.__dict__
+
+class HttpHeader(object):
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            if isinstance(value, datetime):
+                setattr(self, key, value.isoformat())
+            else:
+                setattr(self, key, str(value))
+    def __repr__(self):
+        import json
+        return json.dumps(self.__dict__)
 
 def get_dns_query(key, value):
     if not value:

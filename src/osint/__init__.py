@@ -22,26 +22,38 @@ def get_certificate_detail(cert):
         'issuer': dict(x509.get_issuer().get_components()),
         'serialNumber': x509.get_serial_number(),
         'version': x509.get_version(),
-        'notBefore': datetime.strptime(x509.get_notBefore(), '%Y%m%d%H%M%SZ'),
-        'notAfter': datetime.strptime(x509.get_notAfter(), '%Y%m%d%H%M%SZ'),
+        'notBefore': datetime.strptime(x509.get_notBefore().decode(), '%Y%m%d%H%M%SZ'),
+        'notAfter': datetime.strptime(x509.get_notAfter().decode(), '%Y%m%d%H%M%SZ'),
     }
     extensions = (x509.get_extension(i)
-                  for i in range(x509.get_extension_count()))
+                for i in range(x509.get_extension_count()))
     extension_data = {e.get_short_name(): str(e) for e in extensions}
     result.update(extension_data)
     return result
 
-def get_certificate(host, port=443, timeout=10):
+def get_certificate(host, port=443, timeout=10, referer=None):
     session = get_session()
     log = logging.getLogger()
-    url = 'https://' + host
+    headers = {
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Pragma': 'no-cache',
+    }
+    if referer:
+        headers['referer'] = referer
+    if host.startswith('https'):
+        url = host
+    else:
+        url = 'https://' + host
     try:
-        r = session.head(url)
+        r = session.get(url,headers=headers)
     except:
         return None, None
     if r.status_code != 200:
         if str(r.status_code).startswith('3'):
-            log.warning("Ignoring %d redirect for URL %s" % (r.status_code, url))
+            return get_certificate(r.headers['Location'], referer=host)
         elif r.status_code == 403:
             log.warning("Ignoring Forbidden %s" % url)
         elif r.status_code == 404:
@@ -50,19 +62,19 @@ def get_certificate(host, port=443, timeout=10):
             log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
         return None, None
 
-    context = ssl.create_default_context()
-    conn = socket.create_connection((host, port))
-    sock = context.wrap_socket(conn, server_hostname=host)
-    sock.settimeout(timeout)
-    DER = None
     try:
+        context = ssl.create_default_context()
+        conn = socket.create_connection((host, port))
+        sock = context.wrap_socket(conn, server_hostname=host)
+        sock.settimeout(timeout)
         DER = sock.getpeercert(True)
-    except:
+        PEM = ssl.DER_cert_to_PEM_cert(DER)
+    except Exception as e:
+        print(e)
         return None, None
     finally:
         sock.close()
 
-    PEM = ssl.DER_cert_to_PEM_cert(DER)
     return PEM, r.headers
 
 @retry((dns.resolver.NoNameservers, dns.exception.Timeout), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
@@ -181,28 +193,3 @@ def save_spider(host, spider_dir):
         with open(file_name, 'w+') as f:
             f.write(links)
             return True
-
-def save_https(fqdn, host_ip, https_dir):
-    log = logging.getLogger()
-    now = datetime.utcnow().replace(microsecond=0)
-    updated_date = now.strftime('%Y-%m-%d')
-    if not path.exists(https_dir):
-        makedirs(https_dir)
-    PEM, headers = get_certificate(fqdn)
-    if headers:
-        file_name = path.join(https_dir, updated_date + '_headers.json')
-        with open(file_name, 'w+') as f:
-            log.info('saved https headers for %s' % fqdn)
-            f.write(json.dumps(headers, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o)))
-    file_name = path.join(https_dir, updated_date + '_key.pem')
-    with open(file_name, 'w+') as f:
-        log.info('saved key.pem for %s' % fqdn)
-        f.write(PEM)
-
-    cert = get_certificate_detail(cert=PEM)
-    if not cert:
-        return False
-    file_name = path.join(https_dir, updated_date + '_key_detail.json')
-    with open(file_name, 'w+') as f:
-        f.write(json.dumps(cert, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
-        return cert

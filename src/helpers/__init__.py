@@ -1,4 +1,4 @@
-import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap
+import os, hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc
 from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
@@ -110,35 +110,79 @@ def decompress(file_path, new_dest):
             shutil.copyfileobj(f_in, f_out)
     return new_dest
 
-def parse_file(zonefile_path, regex, document={}):
+def split_file(filepath, lines_per_file=100000):
+    lpf = lines_per_file
+    path, filename = os.path.split(filepath)
+    files = []
+    with open(filepath, 'r') as r:
+        name, ext = os.path.splitext(filename)
+        try:
+            w = open(os.path.join(path, '{}_{}{}'.format(name, 0, ext)), 'w')
+            for i, line in enumerate(r):
+                if not i % lines_per_file:
+                    w.close()
+                    filename = os.path.join(path, '{}_{}{}'.format(name, i, ext))
+                    w = open(filename, 'w')
+                    files.append(filename)
+                w.write(line)
+        finally:
+            w.close()
+    return files
+
+def parse_zonefile(zonefile_path, regex, document={}, n_cpus=2):
     log = logging.getLogger()
     if not path.isfile(zonefile_path):
         log.error('missing zonefile %s' % zonefile_path)
         return
 
+    checkpoint = 0
+    checkpoint_path = zonefile_path + '.checkpoint'
+    if path.isfile(checkpoint_path):
+        with open(checkpoint_path, 'r') as f:
+            checkpoint = int(f.read())
+
     pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
-    with open(zonefile_path, 'r') as f:
+    log.info('Splitting %s' % zonefile_path)
+    for file_path in split_file(zonefile_path):
+        check = int(path.basename(file_path).split('_')[1].split('.')[0])
+        if check < checkpoint:
+            log.info('Already processed %s. skipping..' % file_path)
+            continue
+        log.info('Reading lines of %s' % file_path)
+        with open(checkpoint_path, 'w') as f:
+            f.write(str(check))
+        gc.collect()
+        p = multiprocessing.Pool()
+        p.map(_save, _parse(file_path, zonefile_path, pattern, document), n_cpus)
+        p.close()
+        p.join()
+    os.unlink(checkpoint_path)
+
+def _parse(file_part_path, zonefile_path, pattern, document={}):
+    with open(file_part_path, 'r') as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
             for domain, ttl, ns in pattern.findall(m):
                 d = {
-                    'saved_at': datetime.utcnow().replace(microsecond=0).isoformat(),
                     'fqdn': '%s.%s' % (domain.decode('utf-8'), document['tld']),
                     'domain': domain.decode('utf-8'),
                     'local_file': zonefile_path,
                     'nameserver': ns.decode('utf-8').lower(),
-                    'ttl': int(ttl)
+                    'ttl': 86400 if not ttl.decode('utf-8').strip() else int(ttl)
                 }
                 yield {**document, **d}
-
-def save_zonefiles_document(document):
+def _save(document):
     log = logging.getLogger()
-    domain = Domain(**document)
     zonefiles_db = get_db('zonefiles')
     with zonefiles_db.open_session() as session:
-        query_result = list(session.query(object_type=Domain).where(fqdn=domain.fqdn, nameserver=domain.nameserver))
-        query_result.sort(key=lambda x: x.scanned_at_unix, reverse=True)
-        if not query_result or is_domain_updated(domain, query_result[0]):
-            log.info('Saving %s' % domain.fqdn)
+        query_result = list(session.query(object_type=Domain).where(fqdn=document['fqdn'], nameserver=document['nameserver']).order_by_descending('saved_at_unix'))
+        document['saved_at'] = datetime.utcnow().replace(microsecond=0).isoformat()
+        domain = Domain(**document)
+        if not query_result:
+            log.info('Saving new document for %s' % domain.fqdn)
+            session.store(domain)
+            session.save_changes()
+        elif is_domain_updated(domain, query_result[0]):
+            log.info('Saving updated document for %s' % domain.fqdn)
             session.store(domain)
             session.save_changes()
 
@@ -203,3 +247,23 @@ def md5_checksum(md5_file, target):
     with open(md5_file, 'r') as f:
         md5hash = ''.join(re.findall(r"([a-fA-F\d]{32})", f.read()) or [])
     return validateIntegrity(md5hash.strip(), target)
+
+def decode_bytes(d):
+    ret = {}
+    for key, value in d.items():
+        if type(value) == bytes:
+            val = value.decode()
+        elif isinstance(value, datetime):
+            val = value
+        elif type(value) == dict:
+            val = decode_bytes(value)
+        elif type(value) == str:
+            val = value
+        else:
+            val = str(value)
+        if type(key) == bytes:
+            ret[key.decode()] = val
+        else:
+            ret[key] = val
+    return ret
+

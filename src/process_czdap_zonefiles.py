@@ -3,8 +3,6 @@ import logging, time, re, argparse, json
 from os import path, makedirs
 from datetime import datetime
 
-from pyravendb.store import document_store
-
 from helpers import *
 from models import *
 from czdap import *

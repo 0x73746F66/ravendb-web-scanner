@@ -1,9 +1,7 @@
 #!/usr/bin/env python
-import logging, time, re, argparse, json, multiprocessing, gc
+import logging, time, re, argparse, json
 from os import path, makedirs
 from datetime import datetime
-
-from pyravendb.store import document_store
 
 from helpers import *
 from models import *
@@ -51,17 +49,12 @@ def main():
         if not path.isfile(zonefile.local_file):
             log.info('Missing %s. Skipping..' % zonefile.local_file)
             continue
-        gc.collect()
         log.info('Parsing %s' % zonefile.tld)
-        n_cpu = 3
-        p = multiprocessing.Pool()
-        p.map(save_zonefiles_document, parse_file(zonefile.local_file, regex, {
+        parse_zonefile(zonefile.local_file, regex, {
             'tld': str(zonefile.tld),
             'remote_file': str(zonefile.remote_path),
             'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
-        }), n_cpu)
-        p.close()
-        p.join()
+        }, 3)
         with open(scanfile, "w") as f:
             f.write(str(zonefile.decompressed_at_unix))
 

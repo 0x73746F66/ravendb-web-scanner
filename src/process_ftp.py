@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import time, argparse, logging, json, multiprocessing, gc
+import time, argparse, logging, json
 from os import path, isatty, getcwd, makedirs
 from datetime import datetime
 
@@ -66,17 +66,12 @@ def main():
                     session.store(zonefile)
                     session.save_changes()
             del zonefiles_db, zonefile, decompressed_at, downloaded_at, ftp
-            gc.collect()
             log.info('Parsing %s' % local_file)
-            n_cpu = 3
-            p = multiprocessing.Pool()
-            p.map(save_zonefiles_document, parse_file(local_file, regex, {
+            parse_zonefile(local_file, regex, {
                 'remote_file': remote_path,
                 'scanned_at': started_at.isoformat(),
                 'tld': z.get('tld'),
-            }), n_cpu)
-            p.close()
-            p.join()
+            }, 3)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
