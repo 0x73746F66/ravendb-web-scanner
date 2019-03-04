@@ -133,17 +133,9 @@ def process_tls(domain_name, host_ip):
         log.warn('problem extracting certificate for %s' % domain_name)
         return
     scanned_at = datetime.utcnow().replace(microsecond=0)
-    cert_args = {
-        'domain': domain_name,
-        'scanned_at': scanned_at.isoformat(),
-        'scanned_at_unix': time.mktime(scanned_at.timetuple())
-    }
-    for key, value in cert.items():
-        if type(key) == bytes:
-            cert_args[key.decode()] = value
-        else:
-            cert_args[key] = value
-
+    cert['domain'] = domain_name
+    cert['scanned_at'] = scanned_at.isoformat()
+    cert['scanned_at_unix'] = time.mktime(scanned_at.timetuple())
     certificate = Certificate(**decode_bytes(cert))
     ravendb_key = 'Certificate/%s' % domain_name
     with osint_db.open_session() as session:
