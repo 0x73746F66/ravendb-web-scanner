@@ -44,7 +44,7 @@ def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
                     mtries -= 1
                     mdelay *= backoff
                 except Exception as e:
-                    logger.critical(e)
+                    logger.exception(e)
                     break
             return f(*args, **kwargs)
 
