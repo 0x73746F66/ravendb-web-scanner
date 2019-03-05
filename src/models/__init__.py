@@ -29,7 +29,7 @@ def is_zonefile_updated(new, old):
 def is_whois_updated(new, old):
     if new.status != old.status:
         return True
-    if new.id != old.id:
+    if new.whois_id != old.whois_id:
         return True
     if new.registrar != old.registrar:
         return True
@@ -126,36 +126,6 @@ class Zonefile(object):
     def __repr__(self):
         return self.__dict__
 
-class Whois(object):
-    def __init__(self, id, domain, status, registrar, emails, whois_server, contact_billing, contact_admin, contact_tech, contact_registrant, creation_date, expiration_date, updated_date, scanned_at):
-        self.id = id
-        self.domain = domain.lower()
-        self.status = status
-        self.registrar = registrar
-        self.whois_server = whois_server
-        self.emails = emails
-        self.contact_registrant = contact_registrant
-        self.contact_tech = contact_tech
-        self.contact_admin = contact_admin
-        self.contact_billing = contact_billing
-        self.creation_date = creation_date
-        if creation_date:
-            creation_date_dt = datetime.strptime(creation_date, '%Y-%m-%dT%H:%M:%S')
-            self.creation_date_unix = time.mktime(creation_date_dt.timetuple())
-        self.expiration_date = expiration_date
-        if expiration_date:
-            expiration_date_dt = datetime.strptime(expiration_date, '%Y-%m-%dT%H:%M:%S')
-            self.expiration_date_unix = time.mktime(expiration_date_dt.timetuple())
-        self.updated_date = updated_date
-        if updated_date:
-            updated_date_dt = datetime.strptime(updated_date, '%Y-%m-%dT%H:%M:%S')
-            self.updated_date_unix = time.mktime(updated_date_dt.timetuple())
-        self.scanned_at = scanned_at
-        scanned_at_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
-        self.scanned_at_unix = time.mktime(scanned_at_dt.timetuple())
-    def __repr__(self):
-        return self.__dict__
-
 class DnsQuery(object):
     def __init__(self, domain, A, CNAME, MX, SOA, TXT, scanned_at):
         self.domain = domain.lower()
@@ -200,10 +170,63 @@ class HttpHeader(object):
             else:
                 setattr(self, key, str(value))
     def __repr__(self):
-        import json
-        return json.dumps(self.__dict__)
+        return self.__dict__
 
-def get_dns_query(key, value):
+class Whois(object):
+    def __init__(self, domain, scanned_at, raw=None, whois_id=None, status=None, registrar=None, emails=None, whois_server=None, contact_billing=None, contact_admin=None, contact_tech=None, contact_registrant=None, creation_date=None, expiration_date=None, updated_date=None, **kwargs):
+        self.domain = domain.lower()
+        self.status = status
+        self.registrar = registrar
+        if 'id' in kwargs:
+            self.whois_id = kwargs['id']
+        self.whois_id = whois_id
+        self.whois_server = whois_server
+        self.emails = emails
+        self.contact_registrant = contact_registrant
+        self.contact_tech = contact_tech
+        self.contact_admin = contact_admin
+        self.contact_billing = contact_billing
+        self.creation_date = creation_date
+        if creation_date:
+            creation_date_dt = datetime.strptime(creation_date, '%Y-%m-%dT%H:%M:%S')
+            self.creation_date_unix = time.mktime(creation_date_dt.timetuple())
+        self.expiration_date = expiration_date
+        if expiration_date:
+            expiration_date_dt = datetime.strptime(expiration_date, '%Y-%m-%dT%H:%M:%S')
+            self.expiration_date_unix = time.mktime(expiration_date_dt.timetuple())
+        self.updated_date = updated_date
+        if updated_date:
+            updated_date_dt = datetime.strptime(updated_date, '%Y-%m-%dT%H:%M:%S')
+            self.updated_date_unix = time.mktime(updated_date_dt.timetuple())
+        self.scanned_at = scanned_at
+        scanned_at_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
+        self.scanned_at_unix = time.mktime(scanned_at_dt.timetuple())
+        if raw:
+            self.raw = raw
+    def __repr__(self):
+        return self.__dict__
+
+class WhoisContact(object):
+    def __init__(self, **kwargs):
+        def clean(key):
+            if not key in kwargs:
+                return None
+            return kwargs[key]
+        self.handle = clean('handle')
+        self.name = clean('name')
+        self.organization = clean('organization')
+        self.city = clean('city')
+        self.state = clean('state')
+        self.postalcode = clean('postalcode')
+        self.country = clean('country')
+        self.phone = clean('phone')
+        self.fax = clean('fax')
+        self.email = clean('email')
+        self.street = clean('street')
+    def __repr__(self):
+        return self.__dict__
+
+def load_dns_query(key, value):
     if not value:
         return None
     if key == "SOA":
@@ -211,6 +234,12 @@ def get_dns_query(key, value):
         for v in value:
             soa.append(SOA(**v))
         return soa
+
+def load_whois(key, value):
+    if not value:
+        return None
+    if key.startswith('contact_'):
+        return WhoisContact(**value)
 
 def get_db(database, ravendb_conn=None):
     global db
@@ -225,7 +254,8 @@ def get_db(database, ravendb_conn=None):
     if not database in db:
         db[database] = document_store.DocumentStore(urls=[ravendb_conn], database=database)
         if database == 'osint':
-            db[database].conventions.mappers.update({DnsQuery: get_dns_query})
+            db[database].conventions.mappers.update({DnsQuery: load_dns_query})
+            db[database].conventions.mappers.update({Whois: load_whois})
         db[database].initialize()
 
     return db[database]

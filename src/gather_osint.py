@@ -13,36 +13,38 @@ def process_dns(domain):
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
+    try:
+        host_ip = get_a(domain.fqdn)
+        cname = get_cnames(domain.fqdn)
+        mx = get_mx(domain.fqdn)
+        soa = []
+        for s in get_soa(domain.fqdn):
+            soa.append(SOA(**s))
+        txt = get_txt(domain.fqdn)
 
-    host_ip = get_a(domain.fqdn)
-    cname = get_cnames(domain.fqdn)
-    mx = get_mx(domain.fqdn)
-    soa = []
-    for s in get_soa(domain.fqdn):
-        soa.append(SOA(**s))
-    txt = get_txt(domain.fqdn)
-
-    dns = DnsQuery(
-        domain=domain.fqdn,
-        A=host_ip or None,
-        CNAME=None if not cname else '|'.join(sorted(cname)),
-        MX=None if not mx else '|'.join(sorted(mx)),
-        SOA=soa or None,
-        TXT=None if not txt else '|'.join(sorted(txt)),
-        scanned_at=scanned_at
-    )
-    # with osint_db.open_session() as session:
-    #     query_result = list(session.query(object_type=DnsQuery).where(domain=dns.domain).order_by_descending('scanned_at_unix'))
-    #     if not query_result:
-    #         log.info('Saving new dns query for %s' % dns.domain)
-    #         session.store(dns)
-    #         session.save_changes()
-    #     elif is_dns_updated(dns, query_result[0]):
-    #         log.info('Saving updated dns query for %s' % dns.domain)
-    #         session.store(dns)
-    #         session.save_changes()
-    #     return dns
-    return dns
+        dns = DnsQuery(
+            domain=domain.fqdn,
+            A=host_ip or None,
+            CNAME=None if not cname else '|'.join(sorted(cname)),
+            MX=None if not mx else '|'.join(sorted(mx)),
+            SOA=soa or None,
+            TXT=None if not txt else '|'.join(sorted(txt)),
+            scanned_at=scanned_at
+        )
+        with osint_db.open_session() as session:
+            query_result = list(session.query(object_type=DnsQuery).where(domain=dns.domain).order_by_descending('scanned_at_unix'))
+            if not query_result:
+                log.info('Saving new dns query for %s' % dns.domain)
+                session.store(dns)
+                session.save_changes()
+            elif is_dns_updated(dns, query_result[0]):
+                log.info('Saving updated dns query for %s' % dns.domain)
+                session.store(dns)
+                session.save_changes()
+            return dns
+    except Exception as e:
+        log.exception(e)
+    return None
 
 @retry((WhoisException), tries=5, delay=1, backoff=3, logger=logging.getLogger())
 def process_whois(domain):
@@ -52,33 +54,56 @@ def process_whois(domain):
     scanned_at = now.isoformat()
     try:
         r = get_whois(domain.fqdn, normalized=True)
-        whois = Whois(
-            id=','.join(sorted(r['id'])),
-            domain=domain.fqdn,
-            status=','.join(sorted(r['status'])),
-            registrar=','.join(sorted(r['registrar'])),
-            emails=None if not 'emails' in r else ','.join(sorted(r['emails'])),
-            whois_server=None if not 'whois_server' in r else ','.join(sorted(r['whois_server'])),
-            contact_billing=r['contacts']['billing'],
-            contact_admin=r['contacts']['admin'],
-            contact_tech=r['contacts']['tech'],
-            contact_registrant=r['contacts']['registrant'],
-            creation_date=None if not 'creation_date' in r else r['creation_date'][0].isoformat(),
-            expiration_date=None if not 'expiration_date' in r else r['expiration_date'][0].isoformat(),
-            updated_date=None if not 'updated_date' in r else r['updated_date'][0].isoformat(),
-            scanned_at=scanned_at
-        )
-        with osint_db.open_session() as session:
-            query_result = list(session.query(object_type=Whois).where(domain=whois.domain).order_by_descending('scanned_at_unix'))
-            if not query_result:
-                log.info('Saving new whois for %s' % whois.domain)
-                session.store(whois)
-                session.save_changes()
-            elif is_whois_updated(whois, query_result[0]):
-                log.info('Saving update whois for %s' % whois.domain)
-                session.store(whois)
-                session.save_changes()
-            return whois
+        if r:
+            whois_options = {
+                'domain': domain.fqdn,
+                'scanned_at': scanned_at
+            }
+            has_data = False
+            if 'id' in r:
+                has_data = True
+                if type(r['id']) == list:
+                    whois_options['whois_id'] = ','.join(sorted(r['id']))
+                else:
+                    whois_options['whois_id'] = str(r['id'])
+            for key in ['status', 'registrar', 'emails', 'whois_server']:
+                if key in r:
+                    has_data = True
+                    if type(r[key]) == list:
+                        whois_options[key] = ','.join(sorted(r[key]))
+                    else:
+                        whois_options[key] = str(r[key])
+            for contact in ['billing', 'admin', 'tech', 'registrant']:
+                if 'contacts' in r and contact in r['contacts'] and r['contacts'][contact]:
+                    has_data = True
+                    whois_options['contact_%s'%contact] = r['contacts'][contact]
+            for key in ['updated_date', 'creation_date', 'expiration_date']:
+                if key in r:
+                    has_data = True
+                    if isinstance(r[key], datetime):
+                        whois_options[key] = r[key].isoformat()
+                    elif type(r[key]) == list and isinstance(r[key][0], datetime):
+                        whois_options[key] = r[key][0].isoformat()
+                    else:
+                        whois_options[key] = str(r[key])
+            if not has_data:
+                return
+            if type(r['raw']) == list:
+                whois_options['raw'] = str(r['raw'][0])
+            else:
+                whois_options['raw'] = str(r['raw'])
+            whois = Whois(**whois_options)
+            with osint_db.open_session() as session:
+                query_result = list(session.query(object_type=Whois).where(domain=whois.domain).order_by_descending('scanned_at_unix'))
+                if not query_result:
+                    log.info('Saving new whois for %s' % whois.domain)
+                    session.store(whois)
+                    session.save_changes()
+                elif is_whois_updated(whois, query_result[0]):
+                    log.info('Saving update whois for %s' % whois.domain)
+                    session.store(whois)
+                    session.save_changes()
+                return whois
     except WhoisException as e:
         log.error(e)
         if 'No root WHOIS server found' not in str(e):
@@ -156,6 +181,46 @@ def process_tls(domain_name, host_ip):
         session.advanced.attachment.store(stored_certificate, '%s.pem' % domain_name, PEM, content_type="text/plain")
         session.save_changes()
 
+def gather_osint(zonefile):
+    log = logging.getLogger()
+
+    log.info('Gathering [.%s] domains' % zonefile.tld)
+    with zonefiles_db.open_session() as session:
+        query_result = list(session.query(object_type=Domain).where(tld=zonefile.tld).order_by('saved_at_unix'))
+        if not query_result:
+            log.warn('Nothing to do')
+            return
+        for domain in query_result:
+            if domain.fqdn not in scanned_recently:
+                scanned_recently.add(domain.fqdn)
+                dns = process_dns(domain)
+                if not dns or not dns.A:
+                    continue
+                process_tls(domain.fqdn, dns.A)
+                whois = process_whois(domain) # must be last, retry is buggy
+
+
+
+
+
+                # # pylint: disable=no-member
+                # if not cert.has_key('subjectAltName'):
+                #     return
+                # # pylint: enable=no-member
+                # json_doc = json.dumps(cert, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) )
+                # print(json_doc)
+                # exit(0)
+                # log.debug('found subjectAltName %s' % cert['subjectAltName'])
+                # domains = set()
+                # for d in cert['subjectAltName'].split(','):
+                #     domain = ''.join(d.split('DNS:')).strip()
+                #     if not d.startswith('*'):
+                #         domains.add(domain)
+
+                #     https_subdir = path.join(base_dir, c['osint'].get('https_dir').format(domain=sub_domain_path))
+                #     if save_https(domain, sub_host_ip, https_dir=https_subdir):
+                #         log.info('saved https cert detail for %s' % domain)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
     parser.add_argument('-c', '--config-file', default='config.yaml', help='absolute path to config file')
@@ -188,35 +253,11 @@ if __name__ == '__main__':
     zonefiles = []
     with zonefiles_db.open_session() as session:
         zonefiles = list(session.query(object_type=Zonefile).order_by('started_at_unix'))
-    for zonefile in zonefiles:
-        log.info('Gathering [.%s] domains' % zonefile.tld)
-        with zonefiles_db.open_session() as session:
-            query_result = list(session.query(object_type=Domain).where(tld=zonefile.tld).order_by('saved_at_unix'))
-            if not query_result:
-                log.info('Nothing to do')
-                continue
-            for domain in query_result:
-                if domain.fqdn not in scanned_recently:
-                    scanned_recently.add(domain.fqdn)
-                    whois = process_whois(domain)
-                    dns = process_dns(domain)
-                    if not dns.A:
-                        continue
-                    process_tls(domain.fqdn, dns.A)
-                    # # pylint: disable=no-member
-                    # if not cert.has_key('subjectAltName'):
-                    #     return
-                    # # pylint: enable=no-member
-                    # json_doc = json.dumps(cert, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) )
-                    # print(json_doc)
-                    # exit(0)
-                    # log.debug('found subjectAltName %s' % cert['subjectAltName'])
-                    # domains = set()
-                    # for d in cert['subjectAltName'].split(','):
-                    #     domain = ''.join(d.split('DNS:')).strip()
-                    #     if not d.startswith('*'):
-                    #         domains.add(domain)
+        # zonefiles = list(session.query(object_type=Zonefile).where(tld='sca'))
 
-                    #     https_subdir = path.join(base_dir, c['osint'].get('https_dir').format(domain=sub_domain_path))
-                    #     if save_https(domain, sub_host_ip, https_dir=https_subdir):
-                    #         log.info('saved https cert detail for %s' % domain)
+    gc.collect()
+    p = multiprocessing.Pool()
+    n_cpus = 6
+    p.map(gather_osint, zonefiles, n_cpus)
+    p.close()
+    p.join()
