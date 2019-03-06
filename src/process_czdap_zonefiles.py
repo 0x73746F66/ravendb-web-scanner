@@ -2,11 +2,13 @@
 import logging, time, re, argparse, json
 from os import path, makedirs
 from datetime import datetime
+from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
 from helpers import *
 from models import *
 from czdap import *
 
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
     log = logging.getLogger()
     c = get_config()
@@ -57,13 +59,18 @@ def main():
                 local_file=local_file, 
                 local_file_size=path.getsize(local_file),
             )
+            ravendb_key = 'Zonefile/%s' % zonefile.tld
             with zonefiles_db.open_session() as session:
-                query_result = list(session.query(object_type=Zonefile).where(tld=zonefile.tld))
-                query_result.sort(key=lambda x: x.decompressed_at_unix, reverse=True)
-                if not query_result or is_zonefile_updated(zonefile, query_result[0]):
-                    log.info('Writing %s to ravendb' % zonefile.tld)
-                    session.store(zonefile)
+                stored_zonefile = session.load(ravendb_key)
+                if not stored_zonefile:
+                    log.info('Saving new zonefile for %s' % zonefile.tld)
+                elif is_zonefile_updated(zonefile, stored_zonefile):
+                    log.info('Replacing zonefile for %s' % zonefile.tld)
+                    session.delete(ravendb_key)
                     session.save_changes()
+            with zonefiles_db.open_session() as session:
+                session.store(zonefile, ravendb_key)
+                session.save_changes()
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')

@@ -105,7 +105,7 @@ def download(url, output_directory, access_token):
         log.info("Completed downloading zone to file %s" % file_path)
         return file_path, True
     elif status_code == 401:
-        log.info("The access_token has been expired")
+        log.warn("The access_token has been expired")
         c = get_config()
         authen_base_url = c['czdap'].get('authentication_base_url')
         username = c['czdap'].get('username')
@@ -113,8 +113,8 @@ def download(url, output_directory, access_token):
         access_token = authenticate(username, password, authen_base_url)
         return download(url, output_directory, access_token)
     elif status_code == 404:
-        log.error("No zone file found for %s" % url)
+        log.warn("No zone file found for %s" % url)
     else:
-        log.error('Failed to download zone from {0} with code {1}'.format(url, status_code))
+        log.critical('Failed to download zone from {0} with code {1}'.format(url, status_code))
 
     return file_path, False

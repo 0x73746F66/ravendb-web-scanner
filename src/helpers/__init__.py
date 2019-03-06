@@ -6,6 +6,7 @@ from ftplib import FTP
 from bitmath import Byte
 from progressbar import ProgressBar
 from datetime import datetime
+from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
 from models import get_db, Domain, is_domain_updated
 
@@ -151,11 +152,13 @@ def parse_zonefile(zonefile_path, regex, document={}, n_cpus=2):
         log.info('Reading lines of %s' % file_path)
         with open(checkpoint_path, 'w') as f:
             f.write(str(check))
-        gc.collect()
-        p = multiprocessing.Pool()
-        p.map(_save, _parse(file_path, zonefile_path, pattern, document), n_cpus)
-        p.close()
-        p.join()
+        # gc.collect()
+        # p = multiprocessing.Pool()
+        for doc in _parse(file_path, zonefile_path, pattern, document):
+            _save(doc)
+        # p.map(_save, _parse(file_path, zonefile_path, pattern, document), n_cpus)
+        # p.close()
+        # p.join()
     os.unlink(checkpoint_path)
 
 def _parse(file_part_path, zonefile_path, pattern, document={}):
@@ -170,21 +173,33 @@ def _parse(file_part_path, zonefile_path, pattern, document={}):
                     'ttl': 86400 if not ttl.decode('utf-8').strip() else int(ttl)
                 }
                 yield {**document, **d}
+
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save(document):
     log = logging.getLogger()
     zonefiles_db = get_db('zonefiles')
+    ravendb_key = 'Domain/%s' % document['fqdn']
+    nameservers = set()
+    nameservers.add(document['nameserver'])
     with zonefiles_db.open_session() as session:
-        query_result = list(session.query(object_type=Domain).where(fqdn=document['fqdn'], nameserver=document['nameserver']).order_by_descending('saved_at_unix'))
+        stored_zonefile = session.load(ravendb_key)
+        if stored_zonefile:
+            log.info('Replacing domain for %s' % document['fqdn'])
+            # hack fix
+            if len(stored_zonefile.nameserver.split(',')[0]) != 1:
+                for ns in stored_zonefile.nameserver.split(','):
+                    nameservers.add(ns)
+        else:
+            log.info('Saving new domain for %s' % document['fqdn'])
+
+        document['nameserver'] = ','.join(sorted(nameservers))
         document['saved_at'] = datetime.utcnow().replace(microsecond=0).isoformat()
         domain = Domain(**document)
-        if not query_result:
-            log.info('Saving new document for %s' % domain.fqdn)
-            session.store(domain)
-            session.save_changes()
-        elif is_domain_updated(domain, query_result[0]):
-            log.info('Saving updated document for %s' % domain.fqdn)
-            session.store(domain)
-            session.save_changes()
+        session.delete(ravendb_key)
+        session.save_changes()
+    with zonefiles_db.open_session() as session:
+        session.store(domain, ravendb_key)
+        session.save_changes()
 
 @retry(Exception, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):

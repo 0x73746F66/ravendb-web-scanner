@@ -2,11 +2,13 @@
 import logging, time, re, argparse, json
 from os import path, makedirs
 from datetime import datetime
+from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
 from helpers import *
 from models import *
 from czdap import *
 
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
     log = logging.getLogger()
     c = get_config()

@@ -62,11 +62,11 @@ def get_certificate(host, port=443, timeout=10, referer=None):
             log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
         return None, None
 
+    context = ssl.create_default_context()
+    conn = socket.create_connection((host, port))
+    sock = context.wrap_socket(conn, server_hostname=host)
+    sock.settimeout(timeout)
     try:
-        context = ssl.create_default_context()
-        conn = socket.create_connection((host, port))
-        sock = context.wrap_socket(conn, server_hostname=host)
-        sock.settimeout(timeout)
         DER = sock.getpeercert(True)
         PEM = ssl.DER_cert_to_PEM_cert(DER)
     except Exception as e:

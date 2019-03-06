@@ -58,13 +58,19 @@ def main():
                 local_file_size=path.getsize(local_file),
             )
             zonefiles_db = get_db("zonefiles")
+            ravendb_key = 'Zonefile/%s' % zonefile.tld
             with zonefiles_db.open_session() as session:
-                query_result = list(session.query(object_type=Zonefile).where(tld=zonefile.tld))
-                query_result.sort(key=lambda x: x.started_at_unix, reverse=True)
-                if not query_result or is_zonefile_updated(zonefile, query_result[0]):
-                    log.info('Writing %s to ravendb' % zonefile.tld)
-                    session.store(zonefile)
+                stored_zonefile = session.load(ravendb_key)
+                if not stored_zonefile:
+                    log.info('Saving new zonefile for %s' % zonefile.tld)
+                elif is_zonefile_updated(zonefile, stored_zonefile):
+                    log.info('Replacing zonefile for %s' % zonefile.tld)
+                    session.delete(ravendb_key)
                     session.save_changes()
+            with zonefiles_db.open_session() as session:
+                session.store(zonefile, ravendb_key)
+                session.save_changes()
+
             del zonefiles_db, zonefile, decompressed_at, downloaded_at, ftp
             log.info('Parsing %s' % local_file)
             parse_zonefile(local_file, regex, {

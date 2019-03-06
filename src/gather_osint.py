@@ -2,12 +2,14 @@
 # -*- coding:utf-8
 import argparse, logging
 from datetime import datetime, date, timedelta
+from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
 from helpers import *
 from models import *
 from czdap import *
 from osint import *
 
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_dns(domain):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -35,18 +37,18 @@ def process_dns(domain):
             query_result = list(session.query(object_type=DnsQuery).where(domain=dns.domain).order_by_descending('scanned_at_unix'))
             if not query_result:
                 log.info('Saving new dns query for %s' % dns.domain)
-                session.store(dns)
-                session.save_changes()
             elif is_dns_updated(dns, query_result[0]):
                 log.info('Saving updated dns query for %s' % dns.domain)
-                session.store(dns)
-                session.save_changes()
+            else:
+                return dns
+            session.store(dns, 'DnsQuery/%s' % dns.domain)
+            session.save_changes()
             return dns
     except Exception as e:
         log.exception(e)
     return None
 
-@retry((WhoisException), tries=5, delay=1, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException), tries=5, delay=1, backoff=3, logger=logging.getLogger())
 def process_whois(domain):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -97,12 +99,12 @@ def process_whois(domain):
                 query_result = list(session.query(object_type=Whois).where(domain=whois.domain).order_by_descending('scanned_at_unix'))
                 if not query_result:
                     log.info('Saving new whois for %s' % whois.domain)
-                    session.store(whois)
-                    session.save_changes()
                 elif is_whois_updated(whois, query_result[0]):
                     log.info('Saving update whois for %s' % whois.domain)
-                    session.store(whois)
-                    session.save_changes()
+                else:
+                    return whois
+                session.store(whois, 'Whois/%s' % whois.domain)
+                session.save_changes()
                 return whois
     except WhoisException as e:
         log.error(e)
@@ -127,6 +129,7 @@ def process_whois(domain):
 def process_shodan(domain_name, host_ip):
     log = logging.getLogger()
 
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_tls(domain_name, host_ip):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -181,8 +184,23 @@ def process_tls(domain_name, host_ip):
         session.advanced.attachment.store(stored_certificate, '%s.pem' % domain_name, PEM, content_type="text/plain")
         session.save_changes()
 
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def gather_osint(zonefile):
     log = logging.getLogger()
+    osint_db = get_db("osint")
+    zonefiles_db = get_db("zonefiles")
+    log.info('Gathering recently scanned [.%s] domains to skip' % zonefile.tld)
+    scanned_recently = set()
+    recent_dt = date.today() - timedelta(days=3)
+    with osint_db.open_session() as session:
+        r1 = list(session.query(object_type=Whois).where_greater_than_or_equal('scanned_at_unix', int(recent_dt.strftime("%s"))))
+        r2 = list(session.query(object_type=DnsQuery).where_greater_than_or_equal('scanned_at_unix', int(recent_dt.strftime("%s"))))
+        if r1:
+            for whois in r1:
+                scanned_recently.add(whois.domain)
+        if r2:
+            for dns in r2:
+                scanned_recently.add(dns.domain)
 
     log.info('Gathering [.%s] domains' % zonefile.tld)
     with zonefiles_db.open_session() as session:
@@ -221,6 +239,20 @@ def gather_osint(zonefile):
                 #     if save_https(domain, sub_host_ip, https_dir=https_subdir):
                 #         log.info('saved https cert detail for %s' % domain)
 
+@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+def main():
+    zonefiles_db = get_db("zonefiles")
+    zonefiles = []
+    with zonefiles_db.open_session() as session:
+        zonefiles = list(session.query(object_type=Zonefile).order_by('started_at_unix'))
+
+    gc.collect()
+    p = multiprocessing.Pool()
+    n_cpus = 6
+    p.map(gather_osint, zonefiles, n_cpus)
+    p.close()
+    p.join()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
     parser.add_argument('-c', '--config-file', default='config.yaml', help='absolute path to config file')
@@ -236,28 +268,6 @@ if __name__ == '__main__':
         c['ravendb'].get('host'),
         c['ravendb'].get('port'),
     )
-    osint_db = get_db("osint", ravendb_conn)
-    zonefiles_db = get_db("zonefiles", ravendb_conn)
-    scanned_recently = set()
-    recent_dt = date.today() - timedelta(days=3)
-    with osint_db.open_session() as session:
-        r1 = list(session.query(object_type=Whois).where_greater_than_or_equal('scanned_at_unix', int(recent_dt.strftime("%s"))))
-        r2 = list(session.query(object_type=DnsQuery).where_greater_than_or_equal('scanned_at_unix', int(recent_dt.strftime("%s"))))
-        if r1:
-            for whois in r1:
-                scanned_recently.add(whois.domain)
-        if r2:
-            for dns in r2:
-                scanned_recently.add(dns.domain)
-
-    zonefiles = []
-    with zonefiles_db.open_session() as session:
-        zonefiles = list(session.query(object_type=Zonefile).order_by('started_at_unix'))
-        # zonefiles = list(session.query(object_type=Zonefile).where(tld='sca'))
-
-    gc.collect()
-    p = multiprocessing.Pool()
-    n_cpus = 6
-    p.map(gather_osint, zonefiles, n_cpus)
-    p.close()
-    p.join()
+    get_db("osint", ravendb_conn)
+    get_db("zonefiles", ravendb_conn)
+    main()
