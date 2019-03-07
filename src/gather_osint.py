@@ -276,13 +276,15 @@ def main():
     zonefiles_db = get_db("zonefiles")
     zonefiles = []
     with zonefiles_db.open_session() as session:
-        zonefiles = list(session.query(object_type=Zonefile).order_by('started_at_unix'))
+        three_hours = 21600
+        # zonefile changed in last 3 hours
+        zonefiles = list(session.query(object_type=Zonefile).where_less_than('started_at_unix', datetime.utcnow().timestamp()-three_hours))
     # for zonefile in zonefiles:
     #     gather_osint(zonefile)
     gc.collect()
-    p = multiprocessing.Pool()
-    n_cpus = 12
-    p.map(gather_osint, zonefiles, n_cpus)
+    n_cpus = 3
+    p = multiprocessing.Pool(processes=n_cpus)
+    p.map(gather_osint, zonefiles)
     p.close()
     p.join()
 

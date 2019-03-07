@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import logging, time, re, argparse, json
 from os import path, makedirs
-from datetime import datetime
+from datetime import datetime, timezone
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
 from helpers import *
@@ -20,8 +20,10 @@ def main():
     zonefiles_db = get_db('zonefiles')
     zonefiles = set()
     tlds = set()
+    three_hours = 21600
+    # zonefile changed in last 3 hours
     with zonefiles_db.open_session() as session:
-        query_result = list(session.query(object_type=Zonefile).where(source='czdap').order_by_descending('decompressed_at_unix'))
+        query_result = list(session.query(object_type=Zonefile).where(source='czdap').where_less_than('downloaded_at_unix', datetime.utcnow().timestamp()-three_hours))
         for z in query_result:
             if z.tld not in tlds:
                 tlds.add(z.tld)

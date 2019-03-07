@@ -158,8 +158,8 @@ def parse_zonefile(zonefile_path, regex, document={}, n_cpus=2):
                     _save(doc)
             else:
                 gc.collect()
-                p = multiprocessing.Pool()
-                p.map(_save, _parse(file_path, zonefile_path, pattern, document), n_cpus)
+                p = multiprocessing.Pool(processes=n_cpus)
+                p.map(_save, _parse(file_path, zonefile_path, pattern, document))
                 p.close()
                 p.join()
     finally:
