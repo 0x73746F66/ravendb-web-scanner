@@ -56,7 +56,7 @@ def main():
             'tld': str(zonefile.tld),
             'remote_file': str(zonefile.remote_path),
             'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
-        }, 3)
+        }, 2)
         with open(scanfile, "w") as f:
             f.write(str(zonefile.decompressed_at_unix))
 

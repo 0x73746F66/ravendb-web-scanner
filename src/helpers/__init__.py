@@ -138,28 +138,32 @@ def parse_zonefile(zonefile_path, regex, document={}, n_cpus=2):
 
     checkpoint = 0
     checkpoint_path = zonefile_path + '.checkpoint'
-    if path.isfile(checkpoint_path):
-        with open(checkpoint_path, 'r') as f:
-            checkpoint = int(f.read())
+    try:
+        if path.isfile(checkpoint_path):
+            with open(checkpoint_path, 'r') as f:
+                checkpoint = int(f.read())
 
-    pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
-    log.info('Splitting %s' % zonefile_path)
-    for file_path in split_file(zonefile_path):
-        check = int(path.basename(file_path).split('_')[1].split('.')[0])
-        if check < checkpoint:
-            log.info('Already processed %s. skipping..' % file_path)
-            continue
-        log.info('Reading lines of %s' % file_path)
-        with open(checkpoint_path, 'w') as f:
-            f.write(str(check))
-        # gc.collect()
-        # p = multiprocessing.Pool()
-        for doc in _parse(file_path, zonefile_path, pattern, document):
-            _save(doc)
-        # p.map(_save, _parse(file_path, zonefile_path, pattern, document), n_cpus)
-        # p.close()
-        # p.join()
-    os.unlink(checkpoint_path)
+        pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
+        log.info('Splitting %s' % zonefile_path)
+        for file_path in split_file(zonefile_path):
+            check = int(path.basename(file_path).split('_')[1].split('.')[0])
+            if check < checkpoint:
+                log.info('Already processed %s. skipping..' % file_path)
+                continue
+            log.info('Reading lines of %s' % file_path)
+            with open(checkpoint_path, 'w') as f:
+                f.write(str(check))
+            if not n_cpus or n_cpus <= 1:
+                for doc in _parse(file_path, zonefile_path, pattern, document):
+                    _save(doc)
+            else:
+                gc.collect()
+                p = multiprocessing.Pool()
+                p.map(_save, _parse(file_path, zonefile_path, pattern, document), n_cpus)
+                p.close()
+                p.join()
+    finally:
+        os.unlink(checkpoint_path)
 
 def _parse(file_part_path, zonefile_path, pattern, document={}):
     with open(file_part_path, 'r') as f:

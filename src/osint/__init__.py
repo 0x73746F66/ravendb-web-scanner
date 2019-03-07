@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
 import logging, OpenSSL, socket, ssl
-import scandir, dns, dns.resolver, json, shodan, time
+import scandir, dns, dns.resolver, json, time
 
 from os import path, getcwd, isatty, makedirs
 from urllib.request import urlopen
@@ -141,25 +141,6 @@ def get_txt(domain, nameservers=[]):
         for data in result:
             results.add(str(data))
     return list(results)
-
-@retry(SocketError, tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
-def save_shodan(host, shodan_dir):
-    c = get_config()
-    api = shodan.Shodan(c.get('shodan_api_key'))
-    if not path.exists(shodan_dir):
-        makedirs(shodan_dir)
-    try:
-        r = api.host(host)
-    except (shodan.exception.APIError):
-        return
-    last_update = datetime.strptime(
-        r.get('last_update'), '%Y-%m-%dT%H:%M:%S.%f')
-    updated_date = last_update.strftime('%Y-%m-%d')
-    file_name = path.join(shodan_dir, updated_date + '.json')
-    with open(file_name, 'w+') as f:
-        f.write(
-            json.dumps(r, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) ))
-    return True
 
 def save_spider(host, spider_dir):
     log = logging.getLogger()

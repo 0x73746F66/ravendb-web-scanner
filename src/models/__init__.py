@@ -226,6 +226,38 @@ class WhoisContact(object):
     def __repr__(self):
         return self.__dict__
 
+
+class PortScan(object):
+    def __init__(self, crawler, crawler_id, port, module, transport, raw, response, ptr, isp, asn):
+        self.crawler = crawler
+        self.crawler_id = crawler_id
+        self.port = port
+        self.transport = transport
+        self.module = module
+        self.response = response
+        self.raw = raw
+        self.ptr = ptr
+        self.isp = isp
+        self.asn = asn
+    def __repr__(self):
+        return self.__dict__
+
+
+class Shodan(object):
+    def __init__(self, domain, ip_str, last_update, country_code, country_name, latitude=None, longitude=None, scans=None):
+        self.domain = domain
+        self.ip_str = ip_str
+        self.last_update = last_update
+        self.country_code = country_code
+        self.country_name = country_name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.scans = scans
+
+    def __repr__(self):
+        return self.__dict__
+
+
 def load_dns_query(key, value):
     if not value:
         return None
@@ -234,6 +266,15 @@ def load_dns_query(key, value):
         for v in value:
             soa.append(SOA(**v))
         return soa
+
+def load_shodan(key, value):
+    if not value:
+        return None
+    if key == "scans":
+        scans = []
+        for v in value:
+            scans.append(PortScan(**v))
+        return scans
 
 def load_whois(key, value):
     if not value:
@@ -256,6 +297,7 @@ def get_db(database, ravendb_conn=None):
         if database == 'osint':
             db[database].conventions.mappers.update({DnsQuery: load_dns_query})
             db[database].conventions.mappers.update({Whois: load_whois})
+            db[database].conventions.mappers.update({Shodan: load_shodan})
         db[database].initialize()
 
     return db[database]

@@ -77,7 +77,7 @@ def main():
                 'remote_file': remote_path,
                 'scanned_at': started_at.isoformat(),
                 'tld': z.get('tld'),
-            }, 3)
+            }, 4)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import argparse, logging
+import argparse, logging, shodan
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
@@ -10,22 +10,22 @@ from czdap import *
 from osint import *
 
 @retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
-def process_dns(domain):
+def process_dns(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
     try:
-        host_ip = get_a(domain.fqdn)
-        cname = get_cnames(domain.fqdn)
-        mx = get_mx(domain.fqdn)
+        host_ip = get_a(domain_name)
+        cname = get_cnames(domain_name)
+        mx = get_mx(domain_name)
         soa = []
-        for s in get_soa(domain.fqdn):
+        for s in get_soa(domain_name):
             soa.append(SOA(**s))
-        txt = get_txt(domain.fqdn)
+        txt = get_txt(domain_name)
 
         dns = DnsQuery(
-            domain=domain.fqdn,
+            domain=domain_name,
             A=host_ip or None,
             CNAME=None if not cname else '|'.join(sorted(cname)),
             MX=None if not mx else '|'.join(sorted(mx)),
@@ -49,16 +49,16 @@ def process_dns(domain):
     return None
 
 @retry((WhoisException, AllTopologyNodesDownException), tries=5, delay=1, backoff=3, logger=logging.getLogger())
-def process_whois(domain):
+def process_whois(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
     try:
-        r = get_whois(domain.fqdn, normalized=True)
+        r = get_whois(domain_name, normalized=True)
         if r:
             whois_options = {
-                'domain': domain.fqdn,
+                'domain': domain_name,
                 'scanned_at': scanned_at
             }
             has_data = False
@@ -111,26 +111,63 @@ def process_whois(domain):
         if 'No root WHOIS server found' not in str(e):
             raise Exception(e)
 
-#     if host_ip and save_shodan(host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=fqdn))):
-#         log.info('saved shodan for %s' % fqdn)
-
-#     if save_spider(fqdn, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
-#         log.info('saved spider for %s' % fqdn)
-# for domain in domains:
-#     sub_domain = fqdn, domain.replace(fqdn, '').rstrip('.')
-#     sub_domain_path = path.join(domain_name, sub_domain)
-#     sub_host_ip = get_a(domain)
-#     if save_spider(domain, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=sub_domain_path))):
-#         log.info('saved spider for %s' % domain)
-    
-#     if save_shodan(sub_host_ip, shodan_dir=path.join(base_dir, c['osint'].get('shodan_dir').format(domain=sub_domain_path))):
-#         log.info('saved shodan for %s' % domain)
-
-def process_shodan(domain_name, host_ip):
+def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
+    c = get_config()
+    api = shodan.Shodan(c.get('shodan_api_key'))
+    try:
+        r = api.host(ip_str)
+    except (shodan.exception.APIError):
+        return
+    if r:
+        osint_db = get_db("osint")
+        shodan_obj = {
+            'domain': domain_name,
+            'ip_str': ip_str
+        }
+        for field in ['last_update', 'country_code', 'country_name', 'latitude', 'longitude']:
+            if field in r:
+                if isinstance(r[field], datetime):
+                    shodan_obj[field] = r[field].isoformat()
+                else:
+                    shodan_obj[field] = r[field]
+        if 'ports' in r and 'data' in r and len(r['ports']) > 0:
+            shodan_obj['scans'] = []
+            for data in r['data']:
+                module = data['_shodan']['module']
+                raw = None
+                if module in data:
+                    raw = data[module]
+                shodan_obj['scans'].append(PortScan(
+                            crawler='shodan',
+                            crawler_id=data['_shodan']['id'],
+                            port=int(data['port']),
+                            module=module,
+                            transport=data['transport'],
+                            raw=raw,
+                            response=data['data'],
+                            ptr=None if not 'ptr' in data['_shodan'] else data['_shodan']['ptr'],
+                            isp=None if not 'isp' in data else data['isp'],
+                            asn=None if not 'asn' in data else data['asn']
+                        ))
+        shodan_scan = Shodan(**shodan_obj)
+        ravendb_key = 'Shodan/%s' % domain_name
+        with osint_db.open_session() as session:
+            stored = session.load(ravendb_key)
+            if not stored:
+                log.info('Saving new Shodan for %s' % domain_name)
+            else:
+                log.info('Replacing Shodan for %s' % domain_name)
+                session.delete(ravendb_key)
+                session.save_changes()
+        with osint_db.open_session() as session:
+            session.store(shodan_scan, ravendb_key)
+            session.save_changes()
+
+        return shodan_scan
 
 @retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
-def process_tls(domain_name, host_ip):
+def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
 
@@ -184,6 +221,8 @@ def process_tls(domain_name, host_ip):
         session.advanced.attachment.store(stored_certificate, '%s.pem' % domain_name, PEM, content_type="text/plain")
         session.save_changes()
 
+    return certificate
+
 @retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def gather_osint(zonefile):
     log = logging.getLogger()
@@ -208,36 +247,29 @@ def gather_osint(zonefile):
         if not query_result:
             log.warn('Nothing to do')
             return
-        for domain in query_result:
-            if domain.fqdn not in scanned_recently:
-                scanned_recently.add(domain.fqdn)
-                dns = process_dns(domain)
-                if not dns or not dns.A:
-                    continue
-                process_tls(domain.fqdn, dns.A)
-                whois = process_whois(domain) # must be last, retry is buggy
+        for stored_domain in query_result:
+            if stored_domain.fqdn not in scanned_recently:
+                scanned_recently.add(stored_domain.fqdn)
+                certificate = process_tls(stored_domain.fqdn)
+                domains = set()
+                domains.add(stored_domain.fqdn)
+                if certificate and hasattr(certificate, 'subjectAltName'):
+#                   pylint: disable=no-member
+                    for d in certificate.subjectAltName.split(','):
+#                       pylint: disable=no-member
+                        subdomain = ''.join(d.split('DNS:')).strip()
+                        if not subdomain.startswith('*'):
+                            domains.add(subdomain)
+                            process_tls(subdomain)
+                for domain_name in domains:
+                    dns = process_dns(domain_name)
+                    if not dns or not dns.A:
+                        continue
+                    process_shodan(domain_name, dns.A)
+#     if save_spider(fqdn, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
+#         log.info('saved spider for %s' % fqdn)
 
-
-
-
-
-                # # pylint: disable=no-member
-                # if not cert.has_key('subjectAltName'):
-                #     return
-                # # pylint: enable=no-member
-                # json_doc = json.dumps(cert, default=lambda o: o.isoformat() if isinstance(o, (datetime)) else str(o) )
-                # print(json_doc)
-                # exit(0)
-                # log.debug('found subjectAltName %s' % cert['subjectAltName'])
-                # domains = set()
-                # for d in cert['subjectAltName'].split(','):
-                #     domain = ''.join(d.split('DNS:')).strip()
-                #     if not d.startswith('*'):
-                #         domains.add(domain)
-
-                #     https_subdir = path.join(base_dir, c['osint'].get('https_dir').format(domain=sub_domain_path))
-                #     if save_https(domain, sub_host_ip, https_dir=https_subdir):
-                #         log.info('saved https cert detail for %s' % domain)
+                whois = process_whois(stored_domain.fqdn) # must be last, retry is buggy
 
 @retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
@@ -245,10 +277,11 @@ def main():
     zonefiles = []
     with zonefiles_db.open_session() as session:
         zonefiles = list(session.query(object_type=Zonefile).order_by('started_at_unix'))
-
+    # for zonefile in zonefiles:
+    #     gather_osint(zonefile)
     gc.collect()
     p = multiprocessing.Pool()
-    n_cpus = 6
+    n_cpus = 12
     p.map(gather_osint, zonefiles, n_cpus)
     p.close()
     p.join()
