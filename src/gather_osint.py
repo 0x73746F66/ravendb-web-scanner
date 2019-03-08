@@ -15,6 +15,7 @@ def process_dns(domain_name):
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
+    log.info('Checking DNS for %s' % domain_name)
     try:
         host_ip = get_a(domain_name)
         cname = get_cnames(domain_name)
@@ -54,6 +55,7 @@ def process_whois(domain_name):
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
+    log.info('Checking Whois for %s' % domain_name)
     try:
         r = get_whois(domain_name, normalized=True)
         if r:
@@ -115,6 +117,7 @@ def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
     api = shodan.Shodan(c.get('shodan_api_key'))
+    log.info('Checking Shodan for %s' % domain_name)
     try:
         r = api.host(ip_str)
     except (shodan.exception.APIError):
@@ -170,7 +173,7 @@ def process_shodan(domain_name, ip_str):
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
-
+    log.info('Checking TLS for %s' % domain_name)
     PEM, headers = get_certificate(domain_name)
     if headers:
         scanned_at = datetime.utcnow().replace(microsecond=0)
@@ -224,67 +227,44 @@ def process_tls(domain_name):
     return certificate
 
 @retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
-def gather_osint(zonefile):
+def gather_osint(d):
     log = logging.getLogger()
-    osint_db = get_db("osint")
-    zonefiles_db = get_db("zonefiles")
-    log.info('Gathering recently scanned [.%s] domains to skip' % zonefile.tld)
-    scanned_recently = set()
-    recent_dt = date.today() - timedelta(days=3)
-    with osint_db.open_session() as session:
-        r1 = list(session.query(object_type=Whois).where_greater_than_or_equal('scanned_at_unix', int(recent_dt.strftime("%s"))))
-        r2 = list(session.query(object_type=DnsQuery).where_greater_than_or_equal('scanned_at_unix', int(recent_dt.strftime("%s"))))
-        if r1:
-            for whois in r1:
-                scanned_recently.add(whois.domain)
-        if r2:
-            for dns in r2:
-                scanned_recently.add(dns.domain)
-
-    log.info('Gathering [.%s] domains' % zonefile.tld)
-    with zonefiles_db.open_session() as session:
-        query_result = list(session.query(object_type=Domain).where(tld=zonefile.tld).order_by('saved_at_unix'))
-        if not query_result:
-            log.warn('Nothing to do')
-            return
-        for stored_domain in query_result:
-            if stored_domain.fqdn not in scanned_recently:
-                scanned_recently.add(stored_domain.fqdn)
-                certificate = process_tls(stored_domain.fqdn)
-                domains = set()
-                domains.add(stored_domain.fqdn)
-                if certificate and hasattr(certificate, 'subjectAltName'):
+    domain_name = d.fqdn
+    certificate = process_tls(domain_name)
+    domains = set()
+    domains.add(domain_name)
+    if certificate and hasattr(certificate, 'subjectAltName'):
 #                   pylint: disable=no-member
-                    for d in certificate.subjectAltName.split(','):
+        for d in certificate.subjectAltName.split(','):
 #                       pylint: disable=no-member
-                        subdomain = ''.join(d.split('DNS:')).strip()
-                        if not subdomain.startswith('*'):
-                            domains.add(subdomain)
-                            process_tls(subdomain)
-                for domain_name in domains:
-                    dns = process_dns(domain_name)
-                    if not dns or not dns.A:
-                        continue
-                    process_shodan(domain_name, dns.A)
+            subdomain = ''.join(d.split('DNS:')).strip()
+            if not subdomain.startswith('*'):
+                domains.add(subdomain)
+                process_tls(subdomain)
+    for domain in domains:
+        dns = process_dns(domain)
+        if not dns or not dns.A:
+            continue
+        process_shodan(domain, dns.A)
 #     if save_spider(fqdn, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
 #         log.info('saved spider for %s' % fqdn)
 
-                whois = process_whois(stored_domain.fqdn) # must be last, retry is buggy
+    process_whois(domain_name) # must be last, retry is buggy
 
 @retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
     zonefiles_db = get_db("zonefiles")
-    zonefiles = []
+    domains = []
     with zonefiles_db.open_session() as session:
         three_hours = 21600
         # zonefile changed in last 3 hours
-        zonefiles = list(session.query(object_type=Zonefile).where_less_than('started_at_unix', datetime.utcnow().timestamp()-three_hours))
-    # for zonefile in zonefiles:
-    #     gather_osint(zonefile)
+        domains = list(session.query(object_type=Domain).where_greater_than('saved_at_unix', datetime.utcnow().timestamp()-three_hours).order_by_descending('saved_at_unix'))
+    if not domains:
+        log.warn("Noting to do")
     gc.collect()
     n_cpus = 3
     p = multiprocessing.Pool(processes=n_cpus)
-    p.map(gather_osint, zonefiles)
+    p.map(gather_osint, domains)
     p.close()
     p.join()
 
