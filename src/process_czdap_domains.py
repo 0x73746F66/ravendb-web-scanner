@@ -23,7 +23,7 @@ def main():
     three_hours = 21600
     # zonefile changed in last 3 hours
     with zonefiles_db.open_session() as session:
-        query_result = list(session.query(object_type=Zonefile).where(source='czdap').where_less_than('downloaded_at_unix', datetime.utcnow().timestamp()-three_hours))
+        query_result = list(session.query(object_type=Zonefile).where(source='czdap').where_greater_than('downloaded_at_unix', datetime.utcnow().timestamp()-three_hours).order_by('downloaded_at_unix'))
         for z in query_result:
             if z.tld not in tlds:
                 tlds.add(z.tld)
