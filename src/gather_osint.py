@@ -2,7 +2,7 @@
 # -*- coding:utf-8
 import argparse, logging, shodan
 from datetime import datetime, date, timedelta
-from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
+from pyravendb.custom_exceptions.exceptions import *
 
 from helpers import *
 from models import *
@@ -34,17 +34,21 @@ def process_dns(domain_name):
             TXT=None if not txt else '|'.join(sorted(txt)),
             scanned_at=scanned_at
         )
+        ravendb_key = 'DnsQuery/%s' % dns.domain
         with osint_db.open_session() as session:
-            query_result = list(session.query(object_type=DnsQuery).where(domain=dns.domain).order_by_descending('scanned_at_unix'))
-            if not query_result:
-                log.info('Saving new dns query for %s' % dns.domain)
-            elif is_dns_updated(dns, query_result[0]):
-                log.info('Saving updated dns query for %s' % dns.domain)
+            stored = session.load(ravendb_key)
+            if not stored:
+                log.info('Saving new dns query for %s' % domain_name)
             else:
-                return dns
-            session.store(dns, 'DnsQuery/%s' % dns.domain)
+                log.info('Replacing dns query for %s' % domain_name)
+                session.delete(ravendb_key)
+                session.save_changes()
+        with osint_db.open_session() as session:
+            session.store(dns, ravendb_key)
             session.save_changes()
             return dns
+    except NonUniqueObjectException as e:
+        log.exception(e) #TODO handle this better
     except Exception as e:
         log.exception(e)
     return None
@@ -97,17 +101,18 @@ def process_whois(domain_name):
             else:
                 whois_options['raw'] = str(r['raw'])
             whois = Whois(**whois_options)
+            ravendb_key = 'Whois/%s' % whois.domain
             with osint_db.open_session() as session:
-                query_result = list(session.query(object_type=Whois).where(domain=whois.domain).order_by_descending('scanned_at_unix'))
-                if not query_result:
-                    log.info('Saving new whois for %s' % whois.domain)
-                elif is_whois_updated(whois, query_result[0]):
-                    log.info('Saving update whois for %s' % whois.domain)
+                stored = session.load(ravendb_key)
+                if not stored:
+                    log.info('Saving new whois for %s' % domain_name)
                 else:
-                    return whois
-                session.store(whois, 'Whois/%s' % whois.domain)
+                    log.info('Replacing whois for %s' % domain_name)
+                    session.delete(ravendb_key)
+                    session.save_changes()
+            with osint_db.open_session() as session:
+                session.store(whois, ravendb_key)
                 session.save_changes()
-                return whois
     except WhoisException as e:
         log.error(e)
         if 'No root WHOIS server found' not in str(e):
