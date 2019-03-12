@@ -256,16 +256,24 @@ def gather_osint(d):
 
     process_whois(domain_name) # must be last, retry is buggy
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, ConnectionResetError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
     zonefiles_db = get_db("zonefiles")
     domains = []
+    three_hours = 21600
+    now_unix = datetime.utcnow().timestamp()
+    saved_at_unix = now_unix-three_hours
     with zonefiles_db.open_session() as session:
-        three_hours = 21600
         # zonefile changed in last 3 hours
-        domains = list(session.query(object_type=Domain).where_greater_than('saved_at_unix', datetime.utcnow().timestamp()-three_hours).order_by_descending('saved_at_unix'))
+        domains = list(
+            session.query(object_type=Domain)
+                .where_greater_than('saved_at_unix', saved_at_unix)
+                .random_ordering()
+        )
     if not domains:
-        log.warn("Noting to do")
+        log.warn("Done")
+        exit(0)
+
     gc.collect()
     n_cpus = 3
     p = multiprocessing.Pool(processes=n_cpus)
