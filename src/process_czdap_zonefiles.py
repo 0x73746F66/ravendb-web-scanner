@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, time, re, argparse, json
+import logging, time, re, argparse, json, urllib3
 from os import path, makedirs
 from datetime import datetime
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
@@ -8,7 +8,6 @@ from helpers import *
 from models import *
 from czdap import *
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
     log = logging.getLogger()
     c = get_config()
@@ -36,7 +35,6 @@ def main():
     if not path.exists(output_directory):
         makedirs(output_directory)
 
-    zonefiles_db = get_db('zonefiles')
     for remote_path in zone_links:
         tld = ''.join(''.join(remote_path.split('/')[-1:]).split('.')[0])
         started_at = datetime.utcnow().replace(microsecond=0)
@@ -59,19 +57,25 @@ def main():
                 local_file=local_file, 
                 local_file_size=path.getsize(local_file),
             )
-            ravendb_key = 'Zonefile/%s' % zonefile.tld
-            with zonefiles_db.open_session() as session:
-                stored_zonefile = session.load(ravendb_key)
-                if not stored_zonefile:
-                    log.info('Saving new zonefile for %s' % zonefile.tld)
-                elif is_zonefile_updated(zonefile, stored_zonefile):
-                    log.info('Replacing zonefile for %s' % zonefile.tld)
-                    session.delete(ravendb_key)
-                    session.save_changes()
-            with zonefiles_db.open_session() as session:
-                session.store(zonefile, ravendb_key)
-                session.save_changes()
-        
+            save('Zonefile/%s' % zonefile.tld, zonefile)
+
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+def save(ravendb_key, zonefile):
+    log = logging.getLogger()
+    zonefiles_db = get_db('zonefiles')
+    with zonefiles_db.open_session() as session:
+        stored_zonefile = session.load(ravendb_key)
+        if not stored_zonefile:
+            log.info('Saving new zonefile for %s' % zonefile.tld)
+        elif is_zonefile_updated(zonefile, stored_zonefile):
+            log.info('Replacing zonefile for %s' % zonefile.tld)
+            session.delete(ravendb_key)
+            session.save_changes()
+    with zonefiles_db.open_session() as session:
+        session.store(zonefile, ravendb_key)
+        session.save_changes()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
     parser.add_argument('-c', '--config_file', default='config.yaml', help='absolute path to config file')
@@ -88,4 +92,3 @@ if __name__ == '__main__':
     )
     get_db("zonefiles", ravendb_conn)
     main()
-

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import argparse, logging, shodan
+import argparse, logging, shodan, urllib3
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import *
 
@@ -9,7 +9,7 @@ from models import *
 from czdap import *
 from osint import *
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_dns(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -53,7 +53,7 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((WhoisException, AllTopologyNodesDownException), tries=5, delay=1, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -118,6 +118,7 @@ def process_whois(domain_name):
         if 'No root WHOIS server found' not in str(e):
             raise Exception(e)
 
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
@@ -174,7 +175,7 @@ def process_shodan(domain_name, ip_str):
 
         return shodan_scan
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -231,7 +232,7 @@ def process_tls(domain_name):
 
     return certificate
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def gather_osint(d):
     log = logging.getLogger()
     domain_name = d.fqdn
@@ -256,7 +257,7 @@ def gather_osint(d):
 
     process_whois(domain_name) # must be last, retry is buggy
 
-@retry((AllTopologyNodesDownException, ConnectionResetError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def main():
     zonefiles_db = get_db("zonefiles")
     domains = []
