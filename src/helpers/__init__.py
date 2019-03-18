@@ -136,34 +136,19 @@ def parse_zonefile(zonefile_path, regex, document={}, n_cpus=2):
         log.error('missing zonefile %s' % zonefile_path)
         return
 
-    checkpoint = 0
-    checkpoint_path = zonefile_path + '.checkpoint'
-    try:
-        if path.isfile(checkpoint_path):
-            with open(checkpoint_path, 'r') as f:
-                checkpoint = int(f.read())
-
-        pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
-        log.info('Splitting %s' % zonefile_path)
-        for file_path in split_file(zonefile_path):
-            check = int(path.basename(file_path).split('_')[1].split('.')[0])
-            if check < checkpoint:
-                log.info('Already processed %s. skipping..' % file_path)
-                continue
-            log.info('Reading lines of %s' % file_path)
-            with open(checkpoint_path, 'w') as f:
-                f.write(str(check))
-            if not n_cpus or n_cpus <= 1:
-                for doc in _parse(file_path, zonefile_path, pattern, document):
-                    _save(doc)
-            else:
-                gc.collect()
-                p = multiprocessing.Pool(processes=n_cpus)
-                p.map(_save, _parse(file_path, zonefile_path, pattern, document))
-                p.close()
-                p.join()
-    finally:
-        os.unlink(checkpoint_path)
+    pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
+    log.info('Splitting %s' % zonefile_path)
+    for file_path in reversed(split_file(zonefile_path)):
+        log.info('Reading lines of %s' % file_path)
+        if not n_cpus or n_cpus <= 1:
+            for doc in _parse(file_path, zonefile_path, pattern, document):
+                _save(doc)
+        else:
+            gc.collect()
+            p = multiprocessing.Pool(processes=n_cpus)
+            p.map(_save, _parse(file_path, zonefile_path, pattern, document))
+            p.close()
+            p.join()
 
 def _parse(file_part_path, zonefile_path, pattern, document={}):
     with open(file_part_path, 'r') as f:
@@ -189,10 +174,8 @@ def _save(document):
         stored_zonefile = session.load(ravendb_key)
         if stored_zonefile:
             log.info('Replacing domain for %s' % document['fqdn'])
-            # hack fix
-            if len(stored_zonefile.nameserver.split(',')[0]) != 1:
-                for ns in stored_zonefile.nameserver.split(','):
-                    nameservers.add(ns)
+            for ns in stored_zonefile.nameserver.split(','):
+                nameservers.add(ns)
         else:
             log.info('Saving new domain for %s' % document['fqdn'])
 
