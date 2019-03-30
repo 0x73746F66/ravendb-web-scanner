@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, time, re, argparse, json
+import logging, time, re, argparse, json, urllib3
 from os import path, makedirs
 from datetime import datetime, timezone
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
@@ -8,7 +8,12 @@ from helpers import *
 from models import *
 from czdap import *
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def get_zonefile_by_zonefilepartqueue(zonefile_part_queue):
+    store = get_db('zonefiles')
+    with store.open_session() as session:
+        return session.load('Zonefile/%s' % zonefile_part_queue.tld)
+
 def main():
     log = logging.getLogger()
     c = get_config()
@@ -17,27 +22,13 @@ def main():
         makedirs(output_directory)
 
     regex = c['czdap'].get('regex')
-    zonefiles_db = get_db('zonefiles')
-    zonefiles = set()
-    tlds = set()
-    three_hours = 21600
-    # zonefile changed in last 3 hours
-    with zonefiles_db.open_session() as session:
-        query_result = list(session.query(object_type=Zonefile).where(source='czdap').where_greater_than('downloaded_at_unix', datetime.utcnow().timestamp()-three_hours).order_by('downloaded_at_unix'))
-        for z in query_result:
-            if z.tld not in tlds:
-                tlds.add(z.tld)
-                zonefiles.add(z)
-    del c, zonefiles_db
-
-    for zonefile in zonefiles:
-        scanfile = path.join(output_directory, '%s.scanned' % zonefile.tld)
-        if path.isfile(scanfile):
-            with open(scanfile, "r") as f:
-                val = float(f.read())
-                if val == zonefile.decompressed_at_unix:
-                    log.info('%s has been scanned. skipping..' % zonefile.local_file)
-                    continue
+    for zonefile_part_queue in get_next_from_queue(object_type=ZonefilePartQueue):
+        if not isinstance(zonefile_part_queue, ZonefilePartQueue):
+            break
+        zonefile = get_zonefile_by_zonefilepartqueue(zonefile_part_queue)
+        if not isinstance(zonefile, Zonefile):
+            log.error('%s missing Zonefile. Skipping..' % zonefile_part_queue.file_path)
+            continue
         if not path.isfile(zonefile.local_file):
             if not path.isfile(zonefile.local_compressed_file):
                 access_token = authenticate(c['czdap'].get('username'), c['czdap'].get('password'), c['czdap'].get('authentication_base_url'))
@@ -51,16 +42,20 @@ def main():
                 decompress(zonefile.local_compressed_file, zonefile.local_file)
 
         if not path.isfile(zonefile.local_file):
-            log.info('Missing %s. Skipping..' % zonefile.local_file)
+            log.error('Missing %s. Skipping..' % zonefile.local_file)
             continue
         log.info('Parsing %s' % zonefile.tld)
-        parse_zonefile(zonefile.local_file, regex, {
-            'tld': str(zonefile.tld),
-            'remote_file': str(zonefile.remote_path),
-            'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
-        }, 2)
-        with open(scanfile, "w") as f:
-            f.write(str(zonefile.decompressed_at_unix))
+        parse_zonefile(
+            zonefile=zonefile, 
+            file_path=zonefile_part_queue.file_path,
+            regex=regex, 
+            n_cpus=6,
+            document={
+                'tld': str(zonefile.tld),
+                'remote_file': str(zonefile.remote_path),
+                'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
+            }
+        )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
@@ -76,7 +71,8 @@ if __name__ == '__main__':
         c['ravendb'].get('host'),
         c['ravendb'].get('port'),
     )
-    get_db("zonefiles", ravendb_conn)
+    get_db('zonefiles', ravendb_conn)
+    get_db('queue', ravendb_conn)
     del ravendb_conn, c, log_level, args, parser
     main()
 

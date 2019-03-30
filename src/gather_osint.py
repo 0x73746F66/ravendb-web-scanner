@@ -9,7 +9,7 @@ from models import *
 from czdap import *
 from osint import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_dns(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -53,7 +53,7 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -118,7 +118,7 @@ def process_whois(domain_name):
         if 'No root WHOIS server found' not in str(e):
             raise Exception(e)
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
@@ -175,7 +175,7 @@ def process_shodan(domain_name, ip_str):
 
         return shodan_scan
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -232,7 +232,7 @@ def process_tls(domain_name):
 
     return certificate
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def gather_osint(d):
     log = logging.getLogger()
     domain_name = d.fqdn
@@ -240,9 +240,7 @@ def gather_osint(d):
     domains = set()
     domains.add(domain_name)
     if certificate and hasattr(certificate, 'subjectAltName'):
-#                   pylint: disable=no-member
-        for d in certificate.subjectAltName.split(','):
-#                       pylint: disable=no-member
+        for d in certificate.subjectAltName.split(','): # pylint: disable=no-member
             subdomain = ''.join(d.split('DNS:')).strip()
             if not subdomain.startswith('*'):
                 domains.add(subdomain)
@@ -252,35 +250,33 @@ def gather_osint(d):
         if not dns or not dns.A:
             continue
         process_shodan(domain, dns.A)
-#     if save_spider(fqdn, spider_dir=path.join(base_dir, c['osint'].get('spider_dir').format(domain=fqdn))):
-#         log.info('saved spider for %s' % fqdn)
 
     process_whois(domain_name) # must be last, retry is buggy
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
-def main():
-    zonefiles_db = get_db("zonefiles")
-    domains = []
-    three_hours = 21600
-    now_unix = datetime.utcnow().timestamp()
-    saved_at_unix = now_unix-three_hours
-    with zonefiles_db.open_session() as session:
-        # zonefile changed in last 3 hours
-        domains = list(
-            session.query(object_type=Domain)
-                .where_greater_than('saved_at_unix', saved_at_unix)
-                .random_ordering()
-        )
-    if not domains:
-        log.warn("Done")
-        exit(0)
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def get_domain_by_domainqueue(domain_queue):
+    store = get_db('zonefiles')
+    with store.open_session() as session:
+        return session.load('Domain/%s' % domain_queue.name)
 
-    gc.collect()
-    n_cpus = 3
-    p = multiprocessing.Pool(processes=n_cpus)
-    p.map(gather_osint, domains)
-    p.close()
-    p.join()
+def main():
+    n_cpus = 6
+    for domains_queued in get_next_from_queue(object_type=DomainQueue, take=n_cpus):
+        domains = []
+        for domain_queue in domains_queued:
+            if not isinstance(domain_queue, DomainQueue):
+                break
+            domain = get_domain_by_domainqueue(domain_queue)
+            if not isinstance(domain, Domain):
+                log.error('%s missing Domain. Skipping..' % domain_queue.name)
+                continue
+            domains.append(domain)
+
+        gc.collect()
+        p = multiprocessing.Pool(processes=n_cpus)
+        p.map(gather_osint, domains)
+        p.close()
+        p.join()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
@@ -297,6 +293,7 @@ if __name__ == '__main__':
         c['ravendb'].get('host'),
         c['ravendb'].get('port'),
     )
-    get_db("osint", ravendb_conn)
-    get_db("zonefiles", ravendb_conn)
+    get_db('osint', ravendb_conn)
+    get_db('zonefiles', ravendb_conn)
+    get_db('queue', ravendb_conn)
     main()

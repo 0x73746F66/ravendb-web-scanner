@@ -24,6 +24,8 @@ def is_zonefile_updated(new, old):
         return True
     if new.remote_path != old.remote_path:
         return True
+    if new.line_count != old.line_count:
+        return True
     return False
 
 def is_whois_updated(new, old):
@@ -87,6 +89,22 @@ def is_dns_updated(new, old):
 
     return False
 
+class DomainQueue(object):
+    def __init__(self, name, added):
+        self.name = name.lower()
+        self.added = added
+        added_dt = datetime.strptime(added, '%Y-%m-%dT%H:%M:%S')
+        self.added_unix = time.mktime(added_dt.timetuple())
+
+class ZonefilePartQueue(object):
+    def __init__(self, tld, source, file_path, added):
+        self.tld = tld.lower()
+        self.source = source
+        self.file_path = file_path
+        self.added = added
+        added_dt = datetime.strptime(added, '%Y-%m-%dT%H:%M:%S')
+        self.added_unix = time.mktime(added_dt.timetuple())
+
 class Domain(object):
     def __init__(self, domain, tld, fqdn, ttl, nameserver, scanned_at, saved_at = None, remote_file = None, local_file = None):
         self.domain = domain.lower()
@@ -95,18 +113,20 @@ class Domain(object):
         self.ttl = ttl
         self.nameserver = nameserver.lower()
         self.scanned_at = scanned_at
-        scanned_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
-        self.scanned_at_unix = time.mktime(scanned_dt.timetuple())
+        if scanned_at:
+            scanned_dt = datetime.strptime(scanned_at, '%Y-%m-%dT%H:%M:%S')
+            self.scanned_at_unix = time.mktime(scanned_dt.timetuple())
         self.saved_at = saved_at
-        saved_at_dt = datetime.strptime(saved_at, '%Y-%m-%dT%H:%M:%S')
-        self.saved_at_unix = time.mktime(saved_at_dt.timetuple())
+        if saved_at:
+            saved_at_dt = datetime.strptime(saved_at, '%Y-%m-%dT%H:%M:%S')
+            self.saved_at_unix = time.mktime(saved_at_dt.timetuple())
         self.local_file = local_file
         self.remote_file = remote_file
     def __repr__(self):
         return self.__dict__
 
 class Zonefile(object):
-    def __init__(self, tld, source, started_at, downloaded_at, decompressed_at, remote_path, local_file, local_file_size, local_compressed_file = None, local_compressed_file_size = None):
+    def __init__(self, tld, source, started_at, downloaded_at, decompressed_at, remote_path, local_file, local_file_size, local_compressed_file = None, local_compressed_file_size = None, line_count=None, previous_line_count=None):
         self.tld = tld.lower()
         self.source = source
         self.started_at = started_at
@@ -123,6 +143,8 @@ class Zonefile(object):
         self.local_compressed_file_size = local_compressed_file_size
         self.local_file = local_file
         self.local_file_size = local_file_size
+        self.previous_line_count = previous_line_count
+        self.line_count = line_count
     def __repr__(self):
         return self.__dict__
 

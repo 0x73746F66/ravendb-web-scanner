@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import logging, OpenSSL, socket, ssl
+import logging, OpenSSL, socket, ssl, urllib3
 import scandir, dns, dns.resolver, json, time
 
 from os import path, getcwd, isatty, makedirs
@@ -142,35 +142,35 @@ def get_txt(domain, nameservers=[]):
             results.add(str(data))
     return list(results)
 
-def save_spider(host, spider_dir):
-    log = logging.getLogger()
-    if not path.exists(spider_dir):
-        makedirs(spider_dir)
+# def save_spider(host, spider_dir):
+#     log = logging.getLogger()
+#     if not path.exists(spider_dir):
+#         makedirs(spider_dir)
 
-    html = None
-    url = 'https://' + host
-    log.info('Trying %s' % url)
-    try:
-        website = urlopen(url)
-        html = website.read()
-    except:
-        url = 'http://' + host
-        log.warn('Trying %s' % url)
-        try:
-            website = urlopen(url)
-            html = website.read()
-        except Exception as e:
-            log.error('Unable to crawl %s\t%s' % (host, e))
-    if html:
-        links_tuple = re.findall(r"\"(((http|ftp)s?:)?/{1,2}.*?)\"", html)
-        links = set()
-        for g1, g2, g3 in links_tuple:
-            links.add(g1)
-        links = '\n'.join(list(links))
+#     html = None
+#     url = 'https://' + host
+#     log.info('Trying %s' % url)
+#     try:
+#         website = urlopen(url)
+#         html = website.read()
+#     except:
+#         url = 'http://' + host
+#         log.warn('Trying %s' % url)
+#         try:
+#             website = urlopen(url)
+#             html = website.read()
+#         except Exception as e:
+#             log.error('Unable to crawl %s\t%s' % (host, e))
+#     if html:
+#         links_tuple = re.findall(r"\"(((http|ftp)s?:)?/{1,2}.*?)\"", html)
+#         links = set()
+#         for g1, g2, g3 in links_tuple:
+#             links.add(g1)
+#         links = '\n'.join(list(links))
 
-        updated_date = datetime.utcnow().replace(
-            microsecond=0).strftime('%Y-%m-%d')
-        file_name = path.join(spider_dir, updated_date + '_links.txt')
-        with open(file_name, 'w+') as f:
-            f.write(links)
-            return True
+#         updated_date = datetime.utcnow().replace(
+#             microsecond=0).strftime('%Y-%m-%d')
+#         file_name = path.join(spider_dir, updated_date + '_links.txt')
+#         with open(file_name, 'w+') as f:
+#             f.write(links)
+#             return True

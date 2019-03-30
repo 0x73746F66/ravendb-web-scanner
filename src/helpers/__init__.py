@@ -1,4 +1,4 @@
-import os, hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc
+import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc, urllib3
 from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
@@ -8,7 +8,7 @@ from progressbar import ProgressBar
 from datetime import datetime
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 
-from models import get_db, Domain, is_domain_updated
+from models import *
 
 config = None
 session = None
@@ -111,18 +111,23 @@ def decompress(file_path, new_dest):
             shutil.copyfileobj(f_in, f_out)
     return new_dest
 
+def make_split_filename(filepath, numeric):
+    path_part, filename = path.split(filepath)
+    name, ext = path.splitext(filename)
+    return path.join(path_part, '{}_{}{}'.format(name, numeric, ext))
+
 def split_file(filepath, lines_per_file=100000):
     lpf = lines_per_file
-    path, filename = os.path.split(filepath)
+    path_part, filename = path.split(filepath)
     files = []
     with open(filepath, 'r') as r:
-        name, ext = os.path.splitext(filename)
+        name, ext = path.splitext(filename)
         try:
-            w = open(os.path.join(path, '{}_{}{}'.format(name, 0, ext)), 'w')
+            w = open(path.join(path_part, '{}_{}{}'.format(name, 0, ext)), 'w')
             for i, line in enumerate(r):
                 if not i % lines_per_file:
                     w.close()
-                    filename = os.path.join(path, '{}_{}{}'.format(name, i, ext))
+                    filename = make_split_filename(filepath, i)
                     w = open(filename, 'w')
                     files.append(filename)
                 w.write(line)
@@ -130,47 +135,89 @@ def split_file(filepath, lines_per_file=100000):
             w.close()
     return files
 
-def parse_zonefile(zonefile_path, regex, document={}, n_cpus=2):
-    log = logging.getLogger()
-    if not path.isfile(zonefile_path):
-        log.error('missing zonefile %s' % zonefile_path)
-        return
-
-    pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
-    log.info('Splitting %s' % zonefile_path)
-    for file_path in reversed(split_file(zonefile_path)):
-        log.info('Reading lines of %s' % file_path)
-        if not n_cpus or n_cpus <= 1:
-            for doc in _parse(file_path, zonefile_path, pattern, document):
-                _save(doc)
+def splitfile_rounding(split_lines, line_count):
+    if line_count < split_lines:
+        return 0
+    if line_count == split_lines:
+        return split_lines
+    return int(line_count / split_lines) * split_lines
+    
+def file_line_count(filename, pattern=None):
+    lines = 0
+    f = open(filename, "r+")
+    try:
+        if not pattern:
+            buf = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            while buf.readline():
+                lines += 1
         else:
-            gc.collect()
-            p = multiprocessing.Pool(processes=n_cpus)
-            p.map(_save, _parse(file_path, zonefile_path, pattern, document))
-            p.close()
-            p.join()
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                for t in pattern.findall(m):
+                    lines += 1
+    finally:
+        f.close()
+    return lines
 
-def _parse(file_part_path, zonefile_path, pattern, document={}):
+def split_zonefile(zonefile, split_lines=100000):
+    log = logging.getLogger()
+    if not path.isfile(zonefile.local_file):
+        log.error('missing zonefile %s' % zonefile.local_file)
+        return
+    
+    if zonefile.line_count == zonefile.previous_line_count:
+        log.info('Zonefile .%s unchanged' % zonefile.tld)
+        return
+    log.info('Splitting %s' % zonefile.local_file)
+    split_files = split_file(zonefile.local_file, lines_per_file=split_lines)
+    process_files = []
+    last_file_processed = make_split_filename(zonefile.local_file, splitfile_rounding(split_lines, zonefile.previous_line_count))
+    for f in reversed(split_files):
+        process_files.append(f)
+        if f == last_file_processed:
+            break
+    else:
+        process_files = reversed(split_files)
+    return process_files
+
+def parse_zonefile(zonefile, file_path, regex, document={}, n_cpus=2):
+    log = logging.getLogger()
+    pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
+    log.info('Reading lines of %s' % file_path)
+    if not n_cpus or n_cpus <= 1:
+        for doc in _parse(file_path, zonefile, pattern, document):
+            _save(doc)
+    else:
+        gc.collect()
+        p = multiprocessing.Pool(processes=n_cpus)
+        p.map(_save, _parse(file_path, zonefile, pattern, document))
+        p.close()
+        p.join()
+
+def _parse(file_part_path, zonefile, pattern, document={}):
+    log = logging.getLogger()
     with open(file_part_path, 'r') as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            log.debug('extracting domains using regex')
             for domain, ttl, ns in pattern.findall(m):
+                log.debug('found %s' % '%s.%s' % (domain.decode('utf-8'), document['tld']))
                 d = {
                     'fqdn': '%s.%s' % (domain.decode('utf-8'), document['tld']),
                     'domain': domain.decode('utf-8'),
-                    'local_file': zonefile_path,
+                    'local_file': zonefile.local_file,
                     'nameserver': ns.decode('utf-8').lower(),
                     'ttl': 86400 if not ttl.decode('utf-8').strip() else int(ttl)
                 }
                 yield {**document, **d}
+        log.debug('finished extraction')
 
-@retry((AllTopologyNodesDownException), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save(document):
     log = logging.getLogger()
-    zonefiles_db = get_db('zonefiles')
+    store = get_db('zonefiles')
     ravendb_key = 'Domain/%s' % document['fqdn']
     nameservers = set()
     nameservers.add(document['nameserver'])
-    with zonefiles_db.open_session() as session:
+    with store.open_session() as session:
         stored_zonefile = session.load(ravendb_key)
         if stored_zonefile:
             log.info('Replacing domain for %s' % document['fqdn'])
@@ -184,11 +231,62 @@ def _save(document):
         domain = Domain(**document)
         session.delete(ravendb_key)
         session.save_changes()
-    with zonefiles_db.open_session() as session:
+    with store.open_session() as session:
         session.store(domain, ravendb_key)
         session.save_changes()
 
-@retry(Exception, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+    log.info('Queuing %s' % domain.fqdn)
+    _save_domain_queue(ravendb_key, DomainQueue(
+        name = domain.fqdn,
+        added = domain.saved_at,
+    ))
+
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def get_next_from_queue(object_type, take=1):
+    log = logging.getLogger()
+    store = get_db('queue')
+    generate = True
+    while generate:
+        with store.open_session() as session:
+            queue = list(session.query(object_type=object_type).order_by_descending('added_unix').take(take))
+            if not queue:
+                generate = False
+            for item in queue:
+                log.debug('item %s' % item)
+                if isinstance(item, ZonefilePartQueue):
+                    ravendb_key = 'ZonefilePart/%s' % path.splitext(path.split(item.file_path)[1])[0]
+                    log.debug('deleteing %s' % ravendb_key)
+                    delete_queue_item(ravendb_key)
+                if isinstance(item, DomainQueue):
+                    ravendb_key = 'Domain/%s' % item.name
+                    log.debug('deleteing %s' % ravendb_key)
+                    delete_queue_item(ravendb_key)
+            yield queue if len(queue) != 1 else queue[0]
+
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def delete_queue_item(ravendb_key):
+    log = logging.getLogger()
+    with get_db('queue').open_session() as session:
+        # log.debug('loading entity for %s' % ravendb_key)
+        # entity = session.load(ravendb_key)
+        # log.debug('deleting entity %s' % entity)
+        # session.delete(entity)
+        session.delete(ravendb_key)
+        session.save_changes()
+
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def _save_domain_queue(ravendb_key, domain_queue):
+    log = logging.getLogger()
+    q_db = get_db("queue")
+    with q_db.open_session() as session:
+        if session.load(ravendb_key):
+            return
+    log.info('Saving new domain queue for .%s' % domain_queue.name)
+    with q_db.open_session() as session:
+        session.store(domain_queue, ravendb_key)
+        session.save_changes()
+
+@retry(Exception, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):
     ftp = FTP(server)
     if use_pasv:
