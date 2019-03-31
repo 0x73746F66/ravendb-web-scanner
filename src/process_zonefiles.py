@@ -45,17 +45,20 @@ def main():
             log.error('Missing %s. Skipping..' % zonefile.local_file)
             continue
         log.info('Parsing %s' % zonefile.tld)
-        parse_zonefile(
-            zonefile=zonefile, 
-            file_path=zonefile_part_queue.file_path,
-            regex=regex, 
-            n_cpus=6,
-            document={
-                'tld': str(zonefile.tld),
-                'remote_file': str(zonefile.remote_path),
-                'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
-            }
-        )
+        try:
+            parse_zonefile(
+                zonefile=zonefile, 
+                file_path=zonefile_part_queue.file_path,
+                regex=regex, 
+                n_cpus=6,
+                document={
+                    'tld': str(zonefile.tld),
+                    'remote_file': str(zonefile.remote_path),
+                    'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
+                }
+            )
+        except:
+            pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')

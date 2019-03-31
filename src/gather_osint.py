@@ -54,7 +54,7 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, RetryCatcher), tries=10, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -236,26 +236,28 @@ def process_tls(domain_name):
 
     return certificate
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def gather_osint(d):
     log = logging.getLogger()
     domain_name = d.fqdn
-    certificate = process_tls(domain_name)
-    domains = set()
-    domains.add(domain_name)
-    if certificate and hasattr(certificate, 'subjectAltName'):
-        for d in certificate.subjectAltName.split(','): # pylint: disable=no-member
-            subdomain = ''.join(d.split('DNS:')).strip()
-            if not subdomain.startswith('*'):
-                domains.add(subdomain)
-                process_tls(subdomain)
-    for domain in domains:
-        dns = process_dns(domain)
-        if not dns or not dns.A:
-            continue
-        process_shodan(domain, dns.A)
+    try:
+        certificate = process_tls(domain_name)
+        domains = set()
+        domains.add(domain_name)
+        if certificate and hasattr(certificate, 'subjectAltName'):
+            for d in certificate.subjectAltName.split(','): # pylint: disable=no-member
+                subdomain = ''.join(d.split('DNS:')).strip()
+                if not subdomain.startswith('*'):
+                    domains.add(subdomain)
+                    process_tls(subdomain)
+        for domain in domains:
+            dns = process_dns(domain)
+            if not dns or not dns.A:
+                continue
+            process_shodan(domain, dns.A)
 
-    process_whois(domain_name) # must be last, retry is buggy
+        process_whois(domain_name) # must be last, retry is buggy
+    except:
+        pass
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_domain_by_domainqueue(domain_queue):
