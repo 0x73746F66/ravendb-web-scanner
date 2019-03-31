@@ -3,13 +3,14 @@
 import argparse, logging, shodan, urllib3
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import *
+from random import randint
 
 from helpers import *
 from models import *
 from czdap import *
 from osint import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_dns(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -53,7 +54,7 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, RetryCatcher), tries=10, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -117,8 +118,11 @@ def process_whois(domain_name):
         log.error(e)
         if 'No root WHOIS server found' not in str(e):
             raise Exception(e)
+    except TimeoutError as e:
+        time.sleep(randint(15, 60))
+        raise RetryCatcher(e)
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
@@ -175,7 +179,7 @@ def process_shodan(domain_name, ip_str):
 
         return shodan_scan
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -232,7 +236,7 @@ def process_tls(domain_name):
 
     return certificate
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def gather_osint(d):
     log = logging.getLogger()
     domain_name = d.fqdn
@@ -253,7 +257,7 @@ def gather_osint(d):
 
     process_whois(domain_name) # must be last, retry is buggy
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_domain_by_domainqueue(domain_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:

@@ -8,7 +8,7 @@ from helpers import *
 from models import *
 from czdap import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_zonefile_by_zonefilepartqueue(zonefile_part_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:

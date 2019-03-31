@@ -31,7 +31,7 @@ def get_remote_stat(url, access_token):
 
     return dest_file, file_size
 
-@retry(LookupError, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((LookupError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def authenticate(username, password, authen_base_url):
     log = logging.getLogger()
     authen_headers = {'Content-Type': 'application/json',
@@ -68,7 +68,7 @@ def get_local_files(dest_dir):
 
     return files
 
-@retry(requests.exceptions.ConnectionError, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((requests.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def download(url, output_directory, access_token):
     log = logging.getLogger()
     local_files = get_local_files(output_directory)

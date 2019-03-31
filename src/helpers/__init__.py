@@ -2,7 +2,7 @@ import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multi
 from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
-from ftplib import FTP
+from ftplib import FTP, all_errors
 from bitmath import Byte
 from progressbar import ProgressBar
 from datetime import datetime
@@ -12,6 +12,10 @@ from models import *
 
 config = None
 session = None
+
+class RetryCatcher(Exception):
+    def __init__(self, message):
+        super().__init__(message)
 
 def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
     """
@@ -210,7 +214,7 @@ def _parse(file_part_path, zonefile, pattern, document={}):
                 yield {**document, **d}
         log.debug('finished extraction')
 
-@retry((AllTopologyNodesDownException), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save(document):
     log = logging.getLogger()
     store = get_db('zonefiles')
@@ -241,7 +245,7 @@ def _save(document):
         added = domain.saved_at,
     ))
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_next_from_queue(object_type, take=1):
     log = logging.getLogger()
     store = get_db('queue')
@@ -263,7 +267,7 @@ def get_next_from_queue(object_type, take=1):
                     delete_queue_item(ravendb_key)
             yield queue if len(queue) != 1 else queue[0]
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def delete_queue_item(ravendb_key):
     log = logging.getLogger()
     with get_db('queue').open_session() as session:
@@ -274,7 +278,7 @@ def delete_queue_item(ravendb_key):
         session.delete(ravendb_key)
         session.save_changes()
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save_domain_queue(ravendb_key, domain_queue):
     log = logging.getLogger()
     q_db = get_db("queue")
@@ -286,7 +290,7 @@ def _save_domain_queue(ravendb_key, domain_queue):
         session.store(domain_queue, ravendb_key)
         session.save_changes()
 
-@retry(Exception, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry(all_errors, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def ftp_session(server, user, passwd, use_pasv=True):
     ftp = FTP(server)
     if use_pasv:
