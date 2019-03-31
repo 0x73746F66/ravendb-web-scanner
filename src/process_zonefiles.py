@@ -58,7 +58,8 @@ def main():
                     'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
                 }
             )
-        except:
+        except Exception as e:
+            log.exception(e)
             pass
 
 if __name__ == '__main__':

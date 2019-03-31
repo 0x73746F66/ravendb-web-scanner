@@ -256,7 +256,8 @@ def gather_osint(d):
             process_shodan(domain, dns.A)
 
         process_whois(domain_name) # must be last, retry is buggy
-    except:
+    except Exception as e:
+        log.exception(e)
         pass
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
