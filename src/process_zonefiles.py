@@ -17,6 +17,7 @@ def get_zonefile_by_zonefilepartqueue(zonefile_part_queue):
 def main():
     log = logging.getLogger()
     c = get_config()
+    n_cpus = int(c['multiprocessing_processes'].get('zonefiles', 1))
     output_directory = c.get('tmp_dir')
     if not path.exists(output_directory):
         makedirs(output_directory)
@@ -50,7 +51,7 @@ def main():
                 zonefile=zonefile, 
                 file_path=zonefile_part_queue.file_path,
                 regex=regex, 
-                n_cpus=6,
+                n_cpus=n_cpus,
                 document={
                     'tld': str(zonefile.tld),
                     'remote_file': str(zonefile.remote_path),

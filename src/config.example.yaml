@@ -6,6 +6,11 @@ ravendb:
   host: localhost
   port: 8080
 
+multiprocessing_processes:
+  osint: 6
+  packages: 1
+  zonefiles: 6  
+  
 czdap:
   regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
   authentication_base_url: https://account-api.icann.org

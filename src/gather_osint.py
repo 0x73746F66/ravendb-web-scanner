@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import argparse, logging, shodan, urllib3
+import argparse, logging, shodan, urllib3, multiprocessing
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import *
 from random import randint
@@ -266,7 +266,8 @@ def get_domain_by_domainqueue(domain_queue):
         return session.load('Domain/%s' % domain_queue.name)
 
 def main():
-    n_cpus = 6
+    c = get_config()
+    n_cpus = int(c['multiprocessing_processes'].get('osint', 1))
     for domains_queued in get_next_from_queue(object_type=DomainQueue, take=n_cpus):
         domains = []
         for domain_queue in domains_queued:
