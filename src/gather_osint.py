@@ -10,7 +10,7 @@ from models import *
 from czdap import *
 from osint import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_dns(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -54,7 +54,7 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -122,7 +122,7 @@ def process_whois(domain_name):
         time.sleep(randint(15, 60))
         raise RetryCatcher(e)
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
@@ -179,7 +179,7 @@ def process_shodan(domain_name, ip_str):
 
         return shodan_scan
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")

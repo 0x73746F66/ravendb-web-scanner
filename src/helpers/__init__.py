@@ -214,7 +214,7 @@ def _parse(file_part_path, zonefile, pattern, document={}):
                 yield {**document, **d}
         log.debug('finished extraction')
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save(document):
     log = logging.getLogger()
     store = get_db('zonefiles')
@@ -245,7 +245,7 @@ def _save(document):
         added = domain.saved_at,
     ))
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_next_from_queue(object_type, take=1):
     log = logging.getLogger()
     store = get_db('queue')
@@ -267,7 +267,7 @@ def get_next_from_queue(object_type, take=1):
                     delete_queue_item(ravendb_key)
             yield queue if len(queue) != 1 else queue[0]
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def delete_queue_item(ravendb_key):
     log = logging.getLogger()
     with get_db('queue').open_session() as session:
@@ -278,7 +278,7 @@ def delete_queue_item(ravendb_key):
         session.delete(ravendb_key)
         session.save_changes()
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save_domain_queue(ravendb_key, domain_queue):
     log = logging.getLogger()
     q_db = get_db("queue")
