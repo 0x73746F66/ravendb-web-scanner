@@ -44,20 +44,20 @@ def main():
             download_zonefile = True
             if path.isfile(local_compressed_file):
                 if md5_checksum(md5_file_path, local_compressed_file):
-                    log.info('file %s matches checksum. skipping' % z.get('file_path'))
+                    log.info(f"file {z.get('file_path')} matches checksum. skipping")
                     download_zonefile = False
 
             if download_zonefile:
                 ftp_download(ftp, z.get('file_path'), local_compressed_file)
-                log.info('Download %s complete' % z.get('file_path'))
+                log.info(f'Download {z.get("file_path")} complete')
                 downloaded_at = datetime.utcnow().replace(microsecond=0)
             ftp.quit()
             if download_zonefile:
-                log.info('Decompressing %s' % local_compressed_file)
+                log.info(f'Decompressing {local_compressed_file}')
                 decompress(local_compressed_file, local_file)
                 decompressed_at = datetime.utcnow().replace(microsecond=0)
 
-                ravendb_key = 'Zonefile/%s' % z.get('tld')
+                ravendb_key = f'Zonefile/{z.get("tld")}'
                 previous_line_count, _ = get_zonefile_previous_line_count(ravendb_key)
                 pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
                 line_count = file_line_count(local_file, pattern)
@@ -82,8 +82,8 @@ def main():
                 if not process_files:
                     continue
                 for zonefile_part_path in process_files:
-                    log.info('Queuing %s' % zonefile_part_path)
-                    ravendb_key = 'ZonefilePart/%s' % path.splitext(path.split(zonefile_part_path)[1])[0]
+                    log.info(f'Queuing {zonefile_part_path}')
+                    ravendb_key = f'ZonefilePart/{path.splitext(path.split(zonefile_part_path)[1])[0]}'
                     _save_zonefile_part(ravendb_key, ZonefilePartQueue(
                         tld = zonefile.tld,
                         source = zonefile.source,
@@ -98,9 +98,9 @@ def _save(ravendb_key, zonefile):
     _, stored_zonefile = get_zonefile_previous_line_count(ravendb_key)
     with zonefiles_db.open_session() as session:
         if not stored_zonefile:
-            log.info('Saving new zonefile for %s' % zonefile.tld)
+            log.info(f'Saving new zonefile for {zonefile.tld}')
         elif is_zonefile_updated(zonefile, stored_zonefile):
-            log.info('Replacing zonefile for %s' % zonefile.tld)
+            log.info(f'Replacing zonefile for {zonefile.tld}')
             session.delete(ravendb_key)
             session.save_changes()
     with zonefiles_db.open_session() as session:
@@ -114,7 +114,7 @@ def _save_zonefile_part(ravendb_key, zonefile_part_queue):
     with q_db.open_session() as session:
         if session.load(ravendb_key):
             return
-    log.info('Saving new zonefile part queue for .%s' % zonefile_part_queue.tld)
+    log.info(f'Saving new zonefile part queue for .{zonefile_part_queue.tld}')
     with q_db.open_session() as session:
         session.store(zonefile_part_queue, ravendb_key)
         session.save_changes()

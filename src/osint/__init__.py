@@ -55,11 +55,11 @@ def get_certificate(host, port=443, timeout=10, referer=None):
         if str(r.status_code).startswith('3'):
             return get_certificate(r.headers['Location'], referer=host)
         elif r.status_code == 403:
-            log.warning("Ignoring Forbidden %s" % url)
+            log.warning(f"Ignoring Forbidden {url}")
         elif r.status_code == 404:
-            log.warning("Ignoring Not Found %s" % url)
+            log.warning(f"Ignoring Not Found {url}")
         else:
-            log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+            log.error(f"Unexpected HTTP response code {r.status_code} for URL {url}")
         return None, None
 
     context = ssl.create_default_context()

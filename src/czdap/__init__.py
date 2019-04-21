@@ -24,7 +24,7 @@ def get_remote_stat(url, access_token):
 
     r = session.head(url, params=None, headers=bearer_headers)
     if r.status_code != 200:
-        log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+        log.error(f"Unexpected HTTP response code {r.status_code} for URL {url}")
         return None, None
     dest_file = r.headers['Content-disposition'].replace('attachment;filename=', '').replace('"', '', 2)
     file_size = int(r.headers['Content-Length'])
@@ -62,7 +62,7 @@ def authenticate(username, password, authen_base_url):
 
 def get_local_files(dest_dir):
     files = []
-    for filepath in glob('%s/*.txt.gz' % dest_dir):
+    for filepath in glob(f'{dest_dir}/*.txt.gz'):
         filename = ''.join(filepath.split('/')[-1:])
         files.append(filename)
 
@@ -75,7 +75,7 @@ def download(url, output_directory, access_token):
     remote_file, file_size = get_remote_stat(url, access_token)
     file_path = '{0}/{1}'.format(output_directory, remote_file)
     if not remote_file:
-        log.error("Could not check remote file [%s] cancelling download.." % url)
+        log.error(f"Could not check remote file [{url}] cancelling download..")
         return file_path, False
     if remote_file in local_files:
         try:
@@ -86,7 +86,7 @@ def download(url, output_directory, access_token):
             else:
                 raise
         if local_size == file_size:
-            log.info("Matched local file [%s] skipping download.." % remote_file)
+            log.info(f"Matched local file [{remote_file}] skipping download..")
             return file_path, False
 
     human_size = Byte(file_size).best_prefix()
@@ -102,7 +102,7 @@ def download(url, output_directory, access_token):
             for chunk in download_zone_response.iter_content(1024):
                 f.write(chunk)
 
-        log.info("Completed downloading zone to file %s" % file_path)
+        log.info(f"Completed downloading zone to file {file_path}")
         return file_path, True
     elif status_code == 401:
         log.warn("The access_token has been expired")
@@ -113,7 +113,7 @@ def download(url, output_directory, access_token):
         access_token = authenticate(username, password, authen_base_url)
         return download(url, output_directory, access_token)
     elif status_code == 404:
-        log.warn("No zone file found for %s" % url)
+        log.warn(f"No zone file found for {url}")
     else:
         log.critical('Failed to download zone from {0} with code {1}'.format(url, status_code))
 

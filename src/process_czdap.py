@@ -35,11 +35,11 @@ def main():
     zone_links = None
     if status_code == 200:
         zone_links = links_response.json()
-        log.info("The number of zone files to be downloaded is %d" % len(zone_links))
+        log.info(f"The number of zone files to be downloaded is {len(zone_links)}")
     elif status_code == 401:
-        log.error("The access_token has been expired. Re-authenticate user {0}".format(username))
+        log.error(f"The access_token has been expired. Re-authenticate user {username}")
     else:
-        log.error("Failed to get zone links from {0} with error code {1}".format(links_url, status_code))
+        log.error(f"Failed to get zone links from {links_url} with error code {status_code}")
     if not zone_links:
         exit(1)
 
@@ -53,11 +53,11 @@ def main():
         if downloaded:
             downloaded_at = datetime.utcnow().replace(microsecond=0)
             local_file = local_compressed_file.replace('.gz', '')
-            log.info("Decompressing zone file to %s" % local_compressed_file)
+            log.info(f"Decompressing zone file to {local_compressed_file}")
             decompress(local_compressed_file, local_file)
             decompressed_at = datetime.utcnow().replace(microsecond=0)
 
-            ravendb_key = 'Zonefile/%s' % tld
+            ravendb_key = f'Zonefile/{tld}'
             previous_line_count, _ = get_zonefile_previous_line_count(ravendb_key)
             pattern = re.compile(bytes(regex.encode('utf8')), re.DOTALL | re.IGNORECASE | re.MULTILINE)
             line_count = file_line_count(local_file, pattern)
@@ -81,8 +81,8 @@ def main():
             if not process_files:
                 continue
             for zonefile_part_path in process_files:
-                log.info('Queuing %s' % zonefile_part_path)
-                ravendb_key = 'ZonefilePart/%s' % path.splitext(path.split(zonefile_part_path)[1])[0]
+                log.info(f'Queuing {zonefile_part_path}')
+                ravendb_key = f'ZonefilePart/{path.splitext(path.split(zonefile_part_path)[1])[0]}'
                 _save_zonefile_part(ravendb_key, ZonefilePartQueue(
                     tld = zonefile.tld,
                     source = zonefile.source,
@@ -97,9 +97,9 @@ def _save(ravendb_key, zonefile):
     _, stored_zonefile = get_zonefile_previous_line_count(ravendb_key)
     with zonefiles_db.open_session() as session:
         if not stored_zonefile:
-            log.info('Saving new zonefile for %s' % zonefile.tld)
+            log.info(f'Saving new zonefile for {zonefile.tld}')
         elif is_zonefile_updated(zonefile, stored_zonefile):
-            log.info('Replacing zonefile for %s' % zonefile.tld)
+            log.info(f'Replacing zonefile for {zonefile.tld}')
             session.delete(ravendb_key)
             session.save_changes()
     with zonefiles_db.open_session() as session:
@@ -113,7 +113,7 @@ def _save_zonefile_part(ravendb_key, zonefile_part_queue):
     with q_db.open_session() as session:
         if session.load(ravendb_key):
             return
-    log.info('Saving new zonefile part queue for .%s' % zonefile_part_queue.tld)
+    log.info(f'Saving new zonefile part queue for .{zonefile_part_queue.tld}')
     with q_db.open_session() as session:
         session.store(zonefile_part_queue, ravendb_key)
         session.save_changes()

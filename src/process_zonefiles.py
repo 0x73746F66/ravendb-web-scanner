@@ -12,7 +12,7 @@ from czdap import *
 def get_zonefile_by_zonefilepartqueue(zonefile_part_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:
-        return session.load('Zonefile/%s' % zonefile_part_queue.tld)
+        return session.load(f'Zonefile/{zonefile_part_queue.tld}')
 
 def main():
     log = logging.getLogger()
@@ -28,24 +28,24 @@ def main():
             break
         zonefile = get_zonefile_by_zonefilepartqueue(zonefile_part_queue)
         if not isinstance(zonefile, Zonefile):
-            log.error('%s missing Zonefile. Skipping..' % zonefile_part_queue.file_path)
+            log.error(f'{zonefile_part_queue.file_path} missing Zonefile. Skipping..')
             continue
         if not path.isfile(zonefile.local_file):
             if not path.isfile(zonefile.local_compressed_file):
                 access_token = authenticate(c['czdap'].get('username'), c['czdap'].get('password'), c['czdap'].get('authentication_base_url'))
-                log.info('Downloading from %s' % zonefile.remote_path)
+                log.info(f'Downloading from {zonefile.remote_path}')
                 file_path, downloaded = download(zonefile.remote_path, output_directory, access_token)
                 if downloaded:
-                    log.info('Decompressing to %s' % zonefile.local_file)
+                    log.info(f'Decompressing to {zonefile.local_file}')
                     decompress(file_path, zonefile.local_file)
             else:
-                log.info('Decompressing to %s' % zonefile.local_file)
+                log.info(f'Decompressing to {zonefile.local_file}')
                 decompress(zonefile.local_compressed_file, zonefile.local_file)
 
         if not path.isfile(zonefile.local_file):
-            log.error('Missing %s. Skipping..' % zonefile.local_file)
+            log.error(f'Missing {zonefile.local_file}. Skipping..')
             continue
-        log.info('Parsing %s' % zonefile.tld)
+        log.info(f'Parsing {zonefile.tld}')
         try:
             parse_zonefile(
                 zonefile=zonefile, 

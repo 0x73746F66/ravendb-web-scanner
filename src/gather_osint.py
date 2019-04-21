@@ -16,7 +16,7 @@ def process_dns(domain_name):
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
-    log.info('Checking DNS for %s' % domain_name)
+    log.info(f'Checking DNS for {domain_name}')
     try:
         host_ip = get_a(domain_name)
         cname = get_cnames(domain_name)
@@ -35,13 +35,13 @@ def process_dns(domain_name):
             TXT=None if not txt else '|'.join(sorted(txt)),
             scanned_at=scanned_at
         )
-        ravendb_key = 'DnsQuery/%s' % dns.domain
+        ravendb_key = f'DnsQuery/{dns.domain}'
         with osint_db.open_session() as session:
             stored = session.load(ravendb_key)
             if not stored:
-                log.info('Saving new dns query for %s' % domain_name)
+                log.info(f'Saving new dns query for {domain_name}')
             else:
-                log.info('Replacing dns query for %s' % domain_name)
+                log.info(f'Replacing dns query for {domain_name}')
                 session.delete(ravendb_key)
                 session.save_changes()
         with osint_db.open_session() as session:
@@ -60,7 +60,7 @@ def process_whois(domain_name):
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
     scanned_at = now.isoformat()
-    log.info('Checking Whois for %s' % domain_name)
+    log.info(f'Checking Whois for {domain_name}')
     try:
         r = get_whois(domain_name, normalized=True)
         if r:
@@ -102,13 +102,13 @@ def process_whois(domain_name):
             else:
                 whois_options['raw'] = str(r['raw'])
             whois = Whois(**whois_options)
-            ravendb_key = 'Whois/%s' % whois.domain
+            ravendb_key = f'Whois/{whois.domain}'
             with osint_db.open_session() as session:
                 stored = session.load(ravendb_key)
                 if not stored:
-                    log.info('Saving new whois for %s' % domain_name)
+                    log.info(f'Saving new whois for {domain_name}')
                 else:
-                    log.info('Replacing whois for %s' % domain_name)
+                    log.info(f'Replacing whois for {domain_name}')
                     session.delete(ravendb_key)
                     session.save_changes()
             with osint_db.open_session() as session:
@@ -127,7 +127,7 @@ def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
     api = shodan.Shodan(c.get('shodan_api_key'))
-    log.info('Checking Shodan for %s' % domain_name)
+    log.info(f'Checking Shodan for {domain_name}')
     try:
         r = api.host(ip_str)
     except (shodan.exception.APIError):
@@ -164,13 +164,13 @@ def process_shodan(domain_name, ip_str):
                             asn=None if not 'asn' in data else data['asn']
                         ))
         shodan_scan = Shodan(**shodan_obj)
-        ravendb_key = 'Shodan/%s' % domain_name
+        ravendb_key = f'Shodan/{domain_name}'
         with osint_db.open_session() as session:
             stored = session.load(ravendb_key)
             if not stored:
-                log.info('Saving new Shodan for %s' % domain_name)
+                log.info(f'Saving new Shodan for {domain_name}')
             else:
-                log.info('Replacing Shodan for %s' % domain_name)
+                log.info(f'Replacing Shodan for {domain_name}')
                 session.delete(ravendb_key)
                 session.save_changes()
         with osint_db.open_session() as session:
@@ -183,7 +183,7 @@ def process_shodan(domain_name, ip_str):
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
-    log.info('Checking TLS for %s' % domain_name)
+    log.info(f'Checking TLS for {domain_name}')
     PEM, headers = get_certificate(domain_name)
     if headers:
         scanned_at = datetime.utcnow().replace(microsecond=0)
@@ -191,13 +191,13 @@ def process_tls(domain_name):
         headers['scanned_at'] = scanned_at.isoformat()
         headers['scanned_at_unix'] = time.mktime(scanned_at.timetuple())
         headers = HttpHeader(**decode_bytes(headers))
-        ravendb_key = 'HttpHeader/%s' % domain_name
+        ravendb_key = f'HttpHeader/{domain_name}'
         with osint_db.open_session() as session:
             stored = session.load(ravendb_key)
             if not stored:
-                log.info('Saving new HttpHeader for %s' % domain_name)
+                log.info(f'Saving new HttpHeader for {domain_name}')
             else:
-                log.info('Replacing HttpHeader for %s' % domain_name)
+                log.info(f'Replacing HttpHeader for {domain_name}')
                 session.delete(ravendb_key)
                 session.save_changes()
         with osint_db.open_session() as session:
@@ -208,20 +208,20 @@ def process_tls(domain_name):
         return
     cert = get_certificate_detail(cert=PEM)
     if not cert:
-        log.warn('problem extracting certificate for %s' % domain_name)
+        log.warn(f'problem extracting certificate for {domain_name}')
         return
     scanned_at = datetime.utcnow().replace(microsecond=0)
     cert['domain'] = domain_name
     cert['scanned_at'] = scanned_at.isoformat()
     cert['scanned_at_unix'] = time.mktime(scanned_at.timetuple())
     certificate = Certificate(**decode_bytes(cert))
-    ravendb_key = 'Certificate/%s' % domain_name
+    ravendb_key = f'Certificate/{domain_name}'
     with osint_db.open_session() as session:
         stored_certificate = session.load(ravendb_key)
         if not stored_certificate:
-            log.info('Saving new certificate for %s' % domain_name)
+            log.info(f'Saving new certificate for {domain_name}')
         else:
-            log.info('Replacing certificate for %s' % domain_name)
+            log.info(f'Replacing certificate for {domain_name}')
             session.delete(ravendb_key)
             session.save_changes()
     with osint_db.open_session() as session:
@@ -230,8 +230,8 @@ def process_tls(domain_name):
 
     with osint_db.open_session() as session:
         stored_certificate = session.load(ravendb_key)
-        log.info('Attaching certificate for %s' % domain_name)
-        session.advanced.attachment.store(stored_certificate, '%s.pem' % domain_name, PEM, content_type="text/plain")
+        log.info(f'Attaching certificate for {domain_name}')
+        session.advanced.attachment.store(stored_certificate, f'{domain_name}.pem', PEM, content_type="text/plain")
         session.save_changes()
 
     return certificate
@@ -264,7 +264,7 @@ def gather_osint(d):
 def get_domain_by_domainqueue(domain_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:
-        return session.load('Domain/%s' % domain_queue.name)
+        return session.load(f'Domain/{domain_queue.name}')
 
 def main():
     c = get_config()
@@ -276,7 +276,7 @@ def main():
                 break
             domain = get_domain_by_domainqueue(domain_queue)
             if not isinstance(domain, Domain):
-                log.error('%s missing Domain. Skipping..' % domain_queue.name)
+                log.error(f'{domain_queue.name} missing Domain. Skipping..')
                 continue
             domains.append(domain)
 
