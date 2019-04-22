@@ -289,11 +289,12 @@ def main():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
     parser.add_argument('-c', '--config-file', default='config.yaml', help='absolute path to config file')
+    parser.add_argument('-l', '--log-file', default=None, help='absolute path to config file')
     parser.add_argument('--verbose', '-v', action='count', default=0)
     args = parser.parse_args()
 
     log_level = args.verbose if args.verbose else 3
-    setup_logging(log_level)
+    setup_logging(log_level, file_path=args.log_file)
     log = logging.getLogger()
     c = get_config(config_file=args.config_file)
     ravendb_conn = '{}://{}:{}'.format(

@@ -122,12 +122,12 @@ def _save_zonefile_part(ravendb_key, zonefile_part_queue):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
     parser.add_argument('-c', '--config_file', default='config.yaml', help='absolute path to config file')
-    parser.add_argument('-l', '--reprocess_local_file', help='local zone file to reprocess')
+    parser.add_argument('-l', '--log-file', default=None, help='absolute path to config file')
     parser.add_argument('--verbose', '-v', action='count', default=0)
     args = parser.parse_args()
 
     log_level = args.verbose if args.verbose else 3
-    setup_logging(log_level)
+    setup_logging(log_level, file_path=args.log_file)
     c = get_config(config_file=args.config_file)
 
     ravendb_conn = '{}://{}:{}'.format(

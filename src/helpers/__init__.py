@@ -75,7 +75,7 @@ def get_config(config_file=None):
 
     return config
 
-def setup_logging(log_level):
+def setup_logging(log_level, file_path=None):
     log = logging.getLogger()
     format_str = '%(asctime)s - %(process)d - %(levelname)-8s - %(message)s'
     date_format = '%Y-%m-%d %H:%M:%S'
@@ -94,6 +94,10 @@ def setup_logging(log_level):
         formatter = logging.Formatter(format_str, date_format)
 
     if log_level > 0:
+        if file_path:
+            file_handler = logging.StreamHandler(open(file_path, 'a+'))
+            file_handler.setFormatter(formatter)
+            log.addHandler(file_handler)
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         log.addHandler(stream_handler)
