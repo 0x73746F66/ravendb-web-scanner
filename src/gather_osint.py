@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import argparse, logging, shodan, urllib3, multiprocessing
+import os, argparse, logging, shodan, urllib3, multiprocessing
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import *
 from random import randint
@@ -290,6 +290,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
     parser.add_argument('-c', '--config-file', default='config.yaml', help='absolute path to config file')
     parser.add_argument('-l', '--log-file', default=None, help='absolute path to config file')
+    parser.add_argument('--cron', default=False, type=bool, help='absolute path to config file')
     parser.add_argument('--verbose', '-v', action='count', default=0)
     args = parser.parse_args()
 
@@ -297,6 +298,12 @@ if __name__ == '__main__':
     setup_logging(log_level, file_path=args.log_file)
     log = logging.getLogger()
     c = get_config(config_file=args.config_file)
+    if args.cron:
+        filename = os.path.basename(__file__)
+        if not c['cron_enable'].get(filename):
+            log.warn(f'Configured to terminate {filename}')
+            exit(0)
+
     ravendb_conn = '{}://{}:{}'.format(
         c['ravendb'].get('proto'),
         c['ravendb'].get('host'),

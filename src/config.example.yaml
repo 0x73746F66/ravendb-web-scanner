@@ -6,6 +6,12 @@ ravendb:
   host: localhost
   port: 8080
 
+cron_enable:
+  "gather_osint.py": False
+  "process_czdap.py": False
+  "process_ftp.py": False
+  "process_zonefiles.py": False
+
 multiprocessing_processes:
   osint: 6
   packages: 1

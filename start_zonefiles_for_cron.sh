@@ -10,7 +10,7 @@ if [ -z "${running}" ]; then
     source venv/bin/activate
     cd ${CHDIR}
     echo '[CRON] Running' >> ${LOGFILE}
-    ionice -c2 -n7 python ${SCRIPT} -vvvv -l ${LOGFILE} &
+    ionice -c2 -n7 python ${SCRIPT} -vvvv -l ${LOGFILE} --cron True &
     deactivate
 else
     echo '[CRON] detected script is still active' >> ${LOGFILE}
