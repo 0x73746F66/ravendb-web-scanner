@@ -20,7 +20,7 @@ docker run -d --name ravendb \
     -e RAVEN_Setup_Mode='None' \
     -e RAVEN_Security_UnsecuredAccessAllowed='PrivateNetwork' \
     --restart=unless-stopped \
-    --mount type=bind,src=/mnt/ravendb/data,dst=/opt/RavenDB/Server/RavenData \
+    --mount type=bind,src=/mnt/share/RavenDB/data,dst=/opt/RavenDB/Server/RavenData \
     --mount type=bind,src=/mnt/ravendb/config/settings.json,dst=/opt/RavenDB/settings.json,readonly \
     --mount type=bind,src=/mnt/ravendb/backup,dst=/opt/RavenDB/Backup \
     ravendb/ravendb:4.1.4-ubuntu.18.04-x64

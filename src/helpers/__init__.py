@@ -269,6 +269,10 @@ def get_next_from_queue(object_type, take=1):
                     ravendb_key = 'Domain/%s' % item.name
                     log.debug('deleteing %s' % ravendb_key)
                     delete_queue_item(ravendb_key)
+                if isinstance(item, WhoisQueue):
+                    ravendb_key = 'Whois/%s' % item.name
+                    log.debug('deleteing %s' % ravendb_key)
+                    delete_queue_item(ravendb_key)
             yield queue if len(queue) != 1 else queue[0]
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())

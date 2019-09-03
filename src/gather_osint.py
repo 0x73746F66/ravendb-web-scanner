@@ -54,74 +54,6 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
-def process_whois(domain_name):
-    log = logging.getLogger()
-    osint_db = get_db("osint")
-    now = datetime.utcnow().replace(microsecond=0)
-    scanned_at = now.isoformat()
-    log.info(f'Checking Whois for {domain_name}')
-    try:
-        r = get_whois(domain_name, normalized=True)
-        if r:
-            whois_options = {
-                'domain': domain_name,
-                'scanned_at': scanned_at
-            }
-            has_data = False
-            if 'id' in r:
-                has_data = True
-                if type(r['id']) == list:
-                    whois_options['whois_id'] = ','.join(sorted(r['id']))
-                else:
-                    whois_options['whois_id'] = str(r['id'])
-            for key in ['status', 'registrar', 'emails', 'whois_server']:
-                if key in r:
-                    has_data = True
-                    if type(r[key]) == list:
-                        whois_options[key] = ','.join(sorted(r[key]))
-                    else:
-                        whois_options[key] = str(r[key])
-            for contact in ['billing', 'admin', 'tech', 'registrant']:
-                if 'contacts' in r and contact in r['contacts'] and r['contacts'][contact]:
-                    has_data = True
-                    whois_options['contact_%s'%contact] = r['contacts'][contact]
-            for key in ['updated_date', 'creation_date', 'expiration_date']:
-                if key in r:
-                    has_data = True
-                    if isinstance(r[key], datetime):
-                        whois_options[key] = r[key].isoformat()
-                    elif type(r[key]) == list and isinstance(r[key][0], datetime):
-                        whois_options[key] = r[key][0].isoformat()
-                    else:
-                        whois_options[key] = str(r[key])
-            if not has_data:
-                return
-            if type(r['raw']) == list:
-                whois_options['raw'] = str(r['raw'][0])
-            else:
-                whois_options['raw'] = str(r['raw'])
-            whois = Whois(**whois_options)
-            ravendb_key = f'Whois/{whois.domain}'
-            with osint_db.open_session() as session:
-                stored = session.load(ravendb_key)
-                if not stored:
-                    log.info(f'Saving new whois for {domain_name}')
-                else:
-                    log.info(f'Replacing whois for {domain_name}')
-                    session.delete(ravendb_key)
-                    session.save_changes()
-            with osint_db.open_session() as session:
-                session.store(whois, ravendb_key)
-                session.save_changes()
-    except WhoisException as e:
-        log.error(e)
-        if 'No root WHOIS server found' not in str(e):
-            raise Exception(e)
-    except TimeoutError as e:
-        time.sleep(randint(15, 60))
-        raise RetryCatcher(e)
-
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
@@ -236,9 +168,27 @@ def process_tls(domain_name):
 
     return certificate
 
+
+@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def _save_whois_queue(ravendb_key, domain_queue):
+    q_db = get_db("queue")
+    with q_db.open_session() as session:
+        if session.load(ravendb_key):
+            return
+    with q_db.open_session() as session:
+        session.store(domain_queue, ravendb_key)
+        session.save_changes()
+
 def gather_osint(d):
     log = logging.getLogger()
     domain_name = d.fqdn
+
+    log.info('Queuing WHOIS lookup for %s' % domain_name)
+    _save_whois_queue('Whois/%s' % domain_name, WhoisQueue(
+        name=domain_name,
+        added=d.saved_at,
+    ))
+
     try:
         certificate = process_tls(domain_name)
         domains = set()
@@ -255,7 +205,6 @@ def gather_osint(d):
                 continue
             process_shodan(domain, dns.A)
 
-        process_whois(domain_name) # must be last, retry is buggy
     except Exception as e:
         log.exception(e)
         pass

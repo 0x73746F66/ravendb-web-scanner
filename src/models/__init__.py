@@ -89,6 +89,13 @@ def is_dns_updated(new, old):
 
     return False
 
+class WhoisQueue(object):
+    def __init__(self, name, added):
+        self.name = name.lower()
+        self.added = added
+        added_dt = datetime.strptime(added, '%Y-%m-%dT%H:%M:%S')
+        self.added_unix = time.mktime(added_dt.timetuple())
+
 class DomainQueue(object):
     def __init__(self, name, added):
         self.name = name.lower()
