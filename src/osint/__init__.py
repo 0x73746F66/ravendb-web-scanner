@@ -78,6 +78,24 @@ def get_certificate(host, port=443, timeout=10, referer=None):
     return PEM, r.headers
 
 @retry((dns.resolver.NoNameservers, dns.exception.Timeout), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
+def waybackurls(host):
+    def flatten(a):
+        s = set()
+        for i in a:
+            s | set(i)
+        return s
+
+    url = 'https://web.archive.org/cdx/search/cdx?url={glob}{host}/*&output=json&fl=original&collapse=urlkey'.format(
+        glob='*.', host=host)
+    r = requests.get(url)
+    results = r.json()
+    if results:
+        print(results)
+        print(flatten(results[1:]))
+        exit(0)
+    return flatten(results[1:])
+
+@retry((dns.resolver.NoNameservers, dns.exception.Timeout), tries=20, delay=1, backoff=0.5, logger=logging.getLogger())  # 1.8 hrs
 def get_dns_record(domain, record, nameservers=[]):
     resolver = dns.resolver.get_default_resolver()
     ns_a = resolver.nameservers
