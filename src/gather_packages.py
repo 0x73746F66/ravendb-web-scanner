@@ -158,9 +158,26 @@ def process(fqdn):
         'build.gradle',
         'manifest.json',
         'bower.json',
-        'pubspec.yaml'
+        'pubspec.yaml',
     ]
-    common_dirs = ['src', 'dist', 'public', 'html', 'vendor', 'prd', 'prod', 'production', 'test', 'dev', 'development', 'stg', 'stage', 'staging']
+    common_dirs = [
+        'src',
+        'dist', 
+        'public', 
+        'html',
+        'vendor',
+        'build',
+        'prd',
+        'prod',
+        'production',
+        'test',
+        'dev',
+        'development',
+        'npe',
+        'stg',
+        'stage',
+        'staging',
+    ]
     for p in package_files:
         # test root
         r = get_file(path.join(fqdn, p))
