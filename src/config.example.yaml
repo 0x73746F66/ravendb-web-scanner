@@ -7,18 +7,21 @@ ravendb:
   port: 8080
 
 cron_enable:
-  "gather_osint.py": False
-  "process_czdap.py": False
-  "process_ftp.py": False
-  "process_zonefiles.py": False
+  "gather_osint.py": True
+  "gather_whois.py": True
+  "process_czdap.py": True
+  "process_ftp.py": True
+  "process_zonefiles.py": True
 
 multiprocessing_processes:
-  osint: 6
+  osint: 8
+  whois: 2
+  depscan: 1
   packages: 1
-  zonefiles: 6  
-  
+  zonefiles: 2
+
 czdap:
-  regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
+  regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).?$'
   authentication_base_url: https://account-api.icann.org
   czds_base_url: https://czds-api.icann.org
   username: abc1234
@@ -28,7 +31,7 @@ ftp:
   - server: rzname.verisign-grs.com
     user: abc1234
     passwd: abc1234abc1234abc1234
-    regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).$'
+    regex: '^([a-zA-Z0-9-]+)[.]{1}[a-zA-Z0-9-]+[.]{1}\s+(\d+)\s+in\s+ns\s+([a-zA-Z0-9-\.]+).?$'
     files:
       - md5checksum: name.zone.gz.md5
         file_path: name.zone.gz
