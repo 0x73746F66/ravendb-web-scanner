@@ -243,10 +243,17 @@ def _save(document):
         session.store(domain, ravendb_key)
         session.save_changes()
 
-    log.info('Queuing %s' % domain.fqdn)
-    _save_domain_queue(ravendb_key, DomainQueue(
+    save_to_queue(ravendb_key, DomainQueue(
         name = domain.fqdn,
-        added = domain.saved_at,
+        added = domain.saved_at
+    ))
+    save_to_queue('Whois/%s' % domain.fqdn, WhoisQueue(
+        name=domain.fqdn,
+        added=domain.saved_at
+    ))
+    save_to_queue('DepScan/%s' % domain.fqdn, DepScanQueue(
+        name=domain.fqdn,
+        added=domain.saved_at
     ))
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
@@ -287,15 +294,14 @@ def delete_queue_item(ravendb_key):
         session.save_changes()
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
-def _save_domain_queue(ravendb_key, domain_queue):
-    log = logging.getLogger()
+def save_to_queue(ravendb_key: str, item):
     q_db = get_db("queue")
     with q_db.open_session() as session:
         if session.load(ravendb_key):
             return
-    log.info('Saving new domain queue for .%s' % domain_queue.name)
+    log.info('Saving to queue: %s' % ravendb_key)
     with q_db.open_session() as session:
-        session.store(domain_queue, ravendb_key)
+        session.store(item, ravendb_key)
         session.save_changes()
 
 @retry(all_errors, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())

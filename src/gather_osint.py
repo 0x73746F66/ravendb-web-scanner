@@ -168,26 +168,9 @@ def process_tls(domain_name):
 
     return certificate
 
-
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
-def _save_whois_queue(ravendb_key, domain_queue):
-    q_db = get_db("queue")
-    with q_db.open_session() as session:
-        if session.load(ravendb_key):
-            return
-    with q_db.open_session() as session:
-        session.store(domain_queue, ravendb_key)
-        session.save_changes()
-
 def gather_osint(d):
     log = logging.getLogger()
     domain_name = d.fqdn
-
-    log.info('Queuing WHOIS lookup for %s' % domain_name)
-    _save_whois_queue('Whois/%s' % domain_name, WhoisQueue(
-        name=domain_name,
-        added=d.saved_at,
-    ))
 
     try:
         certificate = process_tls(domain_name)
@@ -199,6 +182,10 @@ def gather_osint(d):
                 if not subdomain.startswith('*'):
                     domains.add(subdomain)
                     process_tls(subdomain)
+                    save_to_queue('DepScan/%s' % subdomain, DepScanQueue(
+                        name=subdomain,
+                        added=datetime.utcnow().replace(microsecond=0).isoformat()
+                    ))
         for domain in domains:
             dns = process_dns(domain)
             if not dns or not dns.A:
