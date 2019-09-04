@@ -11,7 +11,8 @@ from czdap import *
 from osint import *
 
 @retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
-def process_whois(domain_name):
+def process_whois(domain: Domain):
+    domain_name = domain.fqdn
     log = logging.getLogger()
     osint_db = get_db("osint")
     now = datetime.utcnow().replace(microsecond=0)
@@ -78,15 +79,6 @@ def process_whois(domain_name):
         time.sleep(randint(15, 60))
         raise RetryCatcher(e)
 
-def gather_osint(d):
-    log = logging.getLogger()
-    domain_name = d.fqdn
-    try:
-        process_whois(domain_name)
-    except Exception as e:
-        log.exception(e)
-        pass
-
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_domain_by_domainqueue(domain_queue):
     store = get_db('zonefiles')
@@ -107,11 +99,15 @@ def main():
                 continue
             domains.append(domain)
 
-        gc.collect()
-        p = multiprocessing.Pool(processes=n_cpus)
-        p.map(gather_osint, domains)
-        p.close()
-        p.join()
+        if n_cpus == 1:
+            for domain in domains:
+                process_whois(domain)
+        else:
+            gc.collect()
+            p = multiprocessing.Pool(processes=n_cpus)
+            p.map(process_whois, domains)
+            p.close()
+            p.join()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')

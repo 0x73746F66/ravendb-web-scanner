@@ -7,6 +7,7 @@ from bitmath import Byte
 from progressbar import ProgressBar
 from datetime import datetime
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
+from socket import error as SocketError
 
 from models import *
 
@@ -125,7 +126,6 @@ def make_split_filename(filepath, numeric):
     return path.join(path_part, '{}_{}{}'.format(name, numeric, ext))
 
 def split_file(filepath, lines_per_file=100000):
-    lpf = lines_per_file
     path_part, filename = path.split(filepath)
     files = []
     with open(filepath, 'r') as r:
@@ -160,7 +160,7 @@ def file_line_count(filename, pattern=None):
                 lines += 1
         else:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
-                for t in pattern.findall(m):
+                for _ in pattern.findall(m):
                     lines += 1
     finally:
         f.close()
@@ -280,11 +280,11 @@ def get_next_from_queue(object_type, take=1):
                     ravendb_key = 'Whois/%s' % item.name
                     log.debug('deleteing %s' % ravendb_key)
                     delete_queue_item(ravendb_key)
-            yield queue if len(queue) != 1 else queue[0]
+            yield queue
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def delete_queue_item(ravendb_key):
-    log = logging.getLogger()
+    # log = logging.getLogger()
     with get_db('queue').open_session() as session:
         # log.debug('loading entity for %s' % ravendb_key)
         # entity = session.load(ravendb_key)
@@ -294,7 +294,8 @@ def delete_queue_item(ravendb_key):
         session.save_changes()
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
-def save_to_queue(ravendb_key: str, item):
+def save_to_queue(ravendb_key, item):
+    log = logging.getLogger()
     q_db = get_db("queue")
     with q_db.open_session() as session:
         if session.load(ravendb_key):
@@ -385,3 +386,32 @@ def decode_bytes(d):
             ret[key] = val
     return ret
 
+@retry(SocketError, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def get_file(host, uri='', use_https=True):
+    session = get_session()
+    log = logging.getLogger()
+    if use_https:
+        url = 'https://' + path.join(host, uri)
+    else:
+        url = 'http://' + path.join(host, uri)
+    
+    url = url.replace(":80/", "/").replace(":443/", "/")
+
+    try:
+        r = session.head(url, verify=False, timeout=.25)
+    except:
+        if use_https:
+            return get_file(host, uri, use_https=False)
+        return None
+    if not str(r.status_code).startswith('2'):
+        if str(r.status_code).startswith('3'):
+            log.warning("Ignoring %d redirect for URL %s" % (r.status_code, url))
+        elif r.status_code == 403:
+            log.warning("Forbidden %s" % url)
+        elif r.status_code == 404:
+            log.warning("Not Found %s" % url)
+        else:
+            log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+        return None
+
+    return session.get(host)

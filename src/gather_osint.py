@@ -216,11 +216,15 @@ def main():
                 continue
             domains.append(domain)
 
-        gc.collect()
-        p = multiprocessing.Pool(processes=n_cpus)
-        p.map(gather_osint, domains)
-        p.close()
-        p.join()
+        if n_cpus == 1:
+            for domain in domains:
+                gather_osint(domain)
+        else:
+            gc.collect()
+            p = multiprocessing.Pool(processes=n_cpus)
+            p.map(gather_osint, domains)
+            p.close()
+            p.join()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='open net scans')
