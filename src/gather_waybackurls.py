@@ -19,9 +19,14 @@ def process_deps(domain: Domain):
     log.info(f'Checking Deps for {domain.fqdn}')
     try:
         r = waybackurls(domain.fqdn)
-        if r:
-            log.info('{}\ncontent: {}'.format(domain.fqdn, r))
+        if not r:
+            log.warn(f'no waybackurls results for {domain.fqdn}')
+        url_list = file_list_filter(
+            r, ['text/css', 'text/css; charset=utf-8', 'text/plain', 'text/plain; charset=utf-8', 'application/javascript', 'application/javascript; charset=utf-8', 'application/json; charset=utf-8', 'text/json', 'application/manifest+json'], ['.css', '.txt', 'js', 'json'])
+        if url_list:
+            log.info('{}\n{}'.format(domain.fqdn, url_list))
             exit(0)
+        log.warn(f'match no interesting waybackurls for {domain.fqdn}')
 
     except TimeoutError as e:
         time.sleep(randint(15, 60))
