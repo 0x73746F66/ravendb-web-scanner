@@ -21,6 +21,7 @@ def process_deps(domain: Domain):
         r = waybackurls(domain.fqdn)
         if not r:
             log.warn(f'no waybackurls results for {domain.fqdn}')
+            return
         url_list = file_list_filter(
             r, ['text/css', 'text/css; charset=utf-8', 'text/plain', 'text/plain; charset=utf-8', 'application/javascript', 'application/javascript; charset=utf-8', 'application/json; charset=utf-8', 'text/json', 'application/manifest+json'], ['.css', '.txt', 'js', 'json'])
         if url_list:
