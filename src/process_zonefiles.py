@@ -23,44 +23,46 @@ def main():
         makedirs(output_directory)
 
     regex = c['czdap'].get('regex')
-    for zonefile_part_queue in get_next_from_queue(object_type=ZonefilePartQueue):
-        if not isinstance(zonefile_part_queue, ZonefilePartQueue):
-            break
-        zonefile = get_zonefile_by_zonefilepartqueue(zonefile_part_queue)
-        if not isinstance(zonefile, Zonefile):
-            log.error(f'{zonefile_part_queue.file_path} missing Zonefile. Skipping..')
-            continue
-        if not path.isfile(zonefile.local_file):
-            if not path.isfile(zonefile.local_compressed_file):
-                access_token = authenticate(c['czdap'].get('username'), c['czdap'].get('password'), c['czdap'].get('authentication_base_url'))
-                log.info(f'Downloading from {zonefile.remote_path}')
-                file_path, downloaded = download(zonefile.remote_path, output_directory, access_token)
-                if downloaded:
+    for items in get_next_from_queue(object_type=ZonefilePartQueue):
+        for zonefile_part_queue in items:
+            if not isinstance(zonefile_part_queue, ZonefilePartQueue):
+                log.error(f'{type(zonefile_part_queue)} not a ZonefilePartQueue item, breaking..')
+                break
+            zonefile = get_zonefile_by_zonefilepartqueue(zonefile_part_queue)
+            if not isinstance(zonefile, Zonefile):
+                log.error(f'{zonefile_part_queue.file_path} missing Zonefile. Skipping..')
+                continue
+            if not path.isfile(zonefile.local_file):
+                if not path.isfile(zonefile.local_compressed_file):
+                    access_token = authenticate(c['czdap'].get('username'), c['czdap'].get('password'), c['czdap'].get('authentication_base_url'))
+                    log.info(f'Downloading from {zonefile.remote_path}')
+                    file_path, downloaded = download(zonefile.remote_path, output_directory, access_token)
+                    if downloaded:
+                        log.info(f'Decompressing to {zonefile.local_file}')
+                        decompress(file_path, zonefile.local_file)
+                else:
                     log.info(f'Decompressing to {zonefile.local_file}')
-                    decompress(file_path, zonefile.local_file)
-            else:
-                log.info(f'Decompressing to {zonefile.local_file}')
-                decompress(zonefile.local_compressed_file, zonefile.local_file)
+                    decompress(zonefile.local_compressed_file, zonefile.local_file)
 
-        if not path.isfile(zonefile.local_file):
-            log.error(f'Missing {zonefile.local_file}. Skipping..')
-            continue
-        log.info(f'Parsing {zonefile.tld}')
-        try:
-            parse_zonefile(
-                zonefile=zonefile, 
-                file_path=zonefile_part_queue.file_path,
-                regex=regex, 
-                n_cpus=n_cpus,
-                document={
-                    'tld': str(zonefile.tld),
-                    'remote_file': str(zonefile.remote_path),
-                    'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
-                }
-            )
-        except Exception as e:
-            log.exception(e)
-            pass
+            if not path.isfile(zonefile.local_file):
+                log.error(f'Missing {zonefile.local_file}. Skipping..')
+                continue
+            log.info(f'Parsing {zonefile.tld}')
+            try:
+                parse_zonefile(
+                    zonefile=zonefile, 
+                    file_path=zonefile_part_queue.file_path,
+                    regex=regex, 
+                    n_cpus=n_cpus,
+                    document={
+                        'tld': str(zonefile.tld),
+                        'remote_file': str(zonefile.remote_path),
+                        'scanned_at': datetime.utcnow().replace(microsecond=0).isoformat(),
+                    }
+                )
+            except Exception as e:
+                log.exception(e)
+                pass
     log.info('nothing left in queue')
 
 if __name__ == '__main__':
