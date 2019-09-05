@@ -280,6 +280,10 @@ def get_next_from_queue(object_type, take=1):
                     ravendb_key = 'Whois/%s' % item.name
                     log.debug('deleteing %s' % ravendb_key)
                     delete_queue_item(ravendb_key)
+                if isinstance(item, DepScanQueue):
+                    ravendb_key = 'DepScan/%s' % item.name
+                    log.debug('deleteing %s' % ravendb_key)
+                    delete_queue_item(ravendb_key)
             yield queue
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
@@ -398,7 +402,7 @@ def get_file(host, uri='', use_https=True):
     url = url.replace(":80/", "/").replace(":443/", "/")
 
     try:
-        r = session.head(url, verify=False, timeout=.25)
+        r = session.head(url, verify=False, timeout=1)
     except:
         if use_https:
             return get_file(host, uri, use_https=False)
@@ -415,3 +419,44 @@ def get_file(host, uri='', use_https=True):
         return None
 
     return session.get(host)
+
+@retry(SocketError, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+def file_list_filter(file_list: list, content_type: list = [], file_ext: list = []) -> set:
+    return_list = set()
+    session = get_session()
+    log = logging.getLogger()
+    for url in file_list:
+        if file_ext:
+            for ext in file_ext:
+                if ext in url:
+                    return_list.add(url)
+                    log.info(f'added {url}')
+                    continue
+
+        if file_ext and not content_type:
+            log.info(f'skipping {url}, no ext match')
+            continue
+
+        r = session.head(url.replace(":80/", "/").replace(":443/", "/"), verify=False, timeout=1)
+        cType = None
+        if "Content-Type" in r.headers.keys():
+            cType = r.headers["Content-Type"]
+        
+        if not cType or cType not in content_type:
+            log.info(f'skipping {url}, no content_type match')
+            continue
+        
+        if not str(r.status_code).startswith('2'):
+            if str(r.status_code).startswith('3'):
+                log.warning("Ignoring %d redirect for URL %s" % (r.status_code, url))
+            elif r.status_code == 403:
+                log.warning("Forbidden %s" % url)
+            elif r.status_code == 404:
+                log.warning("Not Found %s" % url)
+            else:
+                log.error("Unexpected HTTP response code %d for URL %s" % (r.status_code, url))
+            continue
+        log.info(f'added {url} based on content_type')
+        return_list.add(url)
+
+    return return_list
