@@ -13,7 +13,12 @@ mkdir -p /mnt/ravendb/mnt/ravendb/data /mnt/ravendb/config /mnt/ravendb/backup
 #     "Security.Certificate.Password": ""
 # }
 
+docker pull ravendb/ravendb:4.2-ubuntu-latest && \
 docker run -d --name ravendb \
+    --nprocs 9 \
+    -m $(grep MemTotal /proc/meminfo | awk '{print $2}')m \
+    --memory-reservation $(expr $(grep MemTotal /proc/meminfo | awk '{print $2}') / 4)m \
+    --oom-kill-disable \
     -p "8080:8080" \
     -p "38888:38888" \
     -e RAVEN_ServerUrl_Tcp=38888 \
@@ -23,4 +28,4 @@ docker run -d --name ravendb \
     --mount type=bind,src=/mnt/share/RavenDB/data,dst=/opt/RavenDB/Server/RavenData \
     --mount type=bind,src=/mnt/ravendb/config/settings.json,dst=/opt/RavenDB/settings.json,readonly \
     --mount type=bind,src=/mnt/ravendb/backup,dst=/opt/RavenDB/Backup \
-    ravendb/ravendb:4.1.4-ubuntu.18.04-x64
+    ravendb/ravendb:4.2-ubuntu-latest
