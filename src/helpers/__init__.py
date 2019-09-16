@@ -381,7 +381,7 @@ def get_file(host, uri='', use_https=True):
 
     return session.get(host)
 
-@retry(SocketError, tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry(SocketError, tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def file_list_filter(file_list: list, content_type: list = [], file_ext: list = []) -> set:
     return_list = set()
     session = get_session()
@@ -398,7 +398,7 @@ def file_list_filter(file_list: list, content_type: list = [], file_ext: list = 
             log.info(f'skipping {url}, no ext match')
             continue
 
-        r = session.head(url.replace(":80/", "/").replace(":443/", "/"), verify=False, timeout=1)
+        r = session.head(url.replace(":80/", "/").replace(":443/", "/"), verify=False, timeout=3)
         cType = None
         if "Content-Type" in r.headers.keys():
             cType = r.headers["Content-Type"]
