@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import time, argparse, logging, json, urllib3
+import time, argparse, logging, json, urllib3, retry
 from os import path, isatty, getcwd, makedirs
 from datetime import datetime
 

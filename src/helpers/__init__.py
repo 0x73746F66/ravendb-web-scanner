@@ -1,4 +1,4 @@
-import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc, urllib3
+import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc, urllib3, retry
 from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
@@ -17,45 +17,6 @@ session = None
 class RetryCatcher(Exception):
     def __init__(self, message):
         super().__init__(message)
-
-def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
-    """
-    :param ExceptionToCheck: the exception to check. may be a tuple of exceptions to check
-    :type ExceptionToCheck: Exception or tuple
-    :param tries: number of times to try (not retry) before giving up
-    :type tries: int
-    :param delay: initial delay between retries in seconds
-    :type delay: int
-    :param backoff: backoff multiplier e.g. value of 2 will double the delay each retry
-    :type backoff: int
-    :param logger: logger to use. If None, print
-    :type logger: logging.Logger instance
-    """
-
-    def deco_retry(f):
-        @wraps(f)
-        def f_retry(*args, **kwargs):
-            mtries, mdelay = tries, delay
-            while mtries > 1:
-                try:
-                    return f(*args, **kwargs)
-                except ExceptionToCheck as e:
-                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
-                    if logger:
-                        logger.warning(msg)
-                    else:
-                        print(msg)
-                    time.sleep(mdelay)
-                    mtries -= 1
-                    mdelay *= backoff
-                except Exception as e:
-                    logger.exception(e)
-                    break
-            return f(*args, **kwargs)
-
-        return f_retry  # true decorator
-
-    return deco_retry
 
 def get_session():
   global session

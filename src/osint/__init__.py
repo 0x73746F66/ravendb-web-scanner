@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import logging, OpenSSL, socket, ssl, urllib3
+import logging, OpenSSL, socket, ssl, urllib3, retry
 import scandir, dns, dns.resolver, json, time
 
 from os import path, getcwd, isatty, makedirs

@@ -1,9 +1,14 @@
-import logging, requests, json
-from os import path, errno
+import logging, requests, json, retry
 from glob import glob
 from bitmath import Byte
+from os import path
+try:
+    from os import errno
+except:
+    import errno
 
-from helpers import get_config, get_session, retry
+from helpers import get_config, get_session
+
 
 def do_get(url, access_token):
     session = get_session()

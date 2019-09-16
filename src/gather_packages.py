@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import requests, logging, colorlog, argparse
+import requests, logging, colorlog, argparse, retry
 import scandir, json, time, re, multiprocessing
 from functools import wraps
 from os import path, getcwd, isatty, makedirs

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, time, re, argparse, json, urllib3
+import logging, time, re, argparse, json, urllib3, retry
 from os import path, makedirs
 from datetime import datetime
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
