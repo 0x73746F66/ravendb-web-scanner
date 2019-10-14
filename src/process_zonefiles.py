@@ -2,13 +2,13 @@
 import logging, time, re, argparse, json, urllib3, retry
 from os import path, makedirs
 from datetime import datetime, timezone
-from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
+from pyravendb.custom_exceptions.exceptions import *
 
 from helpers import *
 from models import *
 from czdap import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_zonefile_by_zonefilepartqueue(zonefile_part_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:

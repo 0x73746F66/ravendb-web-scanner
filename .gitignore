@@ -83,6 +83,7 @@ celerybeat-schedule
 
 # Environments
 .venv
+.env/
 env/
 venv/
 ENV/
@@ -117,6 +118,7 @@ credentials.csv
 
 # others
 vendor/
+vendored/
 topology_files/
 zonefiles/
 cert_dot_sh/*.csv

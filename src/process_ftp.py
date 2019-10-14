@@ -7,7 +7,7 @@ from helpers import *
 from models import *
 from czdap import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_zonefile_previous_line_count(ravendb_key):
     stored_zonefile = None
     previous_line_count = 0
@@ -91,7 +91,7 @@ def main():
                         added = decompressed_at.isoformat(),
                     ))
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save(ravendb_key, zonefile):
     log = logging.getLogger()
     zonefiles_db = get_db("zonefiles")
@@ -107,7 +107,7 @@ def _save(ravendb_key, zonefile):
         session.store(zonefile, ravendb_key)
         session.save_changes()
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def _save_zonefile_part(ravendb_key, zonefile_part_queue):
     log = logging.getLogger()
     q_db = get_db("queue")

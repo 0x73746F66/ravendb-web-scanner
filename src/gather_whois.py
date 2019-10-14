@@ -10,7 +10,7 @@ from models import *
 from czdap import *
 from osint import *
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain: Domain):
     domain_name = domain.fqdn
     log = logging.getLogger()
@@ -79,7 +79,7 @@ def process_whois(domain: Domain):
         time.sleep(randint(15, 60))
         raise RetryCatcher(e)
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_domain_by_domainqueue(domain_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:

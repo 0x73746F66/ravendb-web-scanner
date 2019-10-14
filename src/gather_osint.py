@@ -10,7 +10,7 @@ from models import *
 from czdap import *
 from osint import *
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_dns(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -54,7 +54,7 @@ def process_dns(domain_name):
         log.exception(e)
     return None
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_shodan(domain_name, ip_str):
     log = logging.getLogger()
     c = get_config()
@@ -111,7 +111,7 @@ def process_shodan(domain_name, ip_str):
 
         return shodan_scan
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_tls(domain_name):
     log = logging.getLogger()
     osint_db = get_db("osint")
@@ -196,7 +196,7 @@ def gather_osint(d):
         log.exception(e)
         pass
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_domain_by_domainqueue(domain_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:

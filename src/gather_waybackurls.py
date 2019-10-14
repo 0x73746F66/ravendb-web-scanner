@@ -11,7 +11,7 @@ from czdap import *
 from osint import *
 
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=1, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=1, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_deps(domain: Domain):
     log = logging.getLogger()
     # osint_db = get_db("osint")
@@ -34,7 +34,7 @@ def process_deps(domain: Domain):
         time.sleep(randint(15, 60))
         raise RetryCatcher(e)
 
-@retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, TimeoutError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((urllib3.exceptions.ProtocolError, TimeoutError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_domain_by_domainqueue(domain_queue):
     store = get_db('zonefiles')
     with store.open_session() as session:

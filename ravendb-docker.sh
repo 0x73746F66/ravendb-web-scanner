@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# /mnt/ravendb/config/license.json
-mkdir -p /mnt/ravendb/mnt/ravendb/data /mnt/ravendb/config /mnt/ravendb/backup
+# /mnt/share/RavenDB/config/license.json
+mkdir -p /mnt/share/RavenDB/mnt/share/RavenDB/data /mnt/share/RavenDB/config /mnt/share/RavenDB/backup
 
-# /mnt/ravendb/config/settings.json
+# /mnt/share/RavenDB/config/settings.json
 # {
 #     "ServerUrl": "http://127.0.0.1:8080",
 #     "PublicServerUrl": "http://ravendb.langton.cloud:8080",
@@ -26,6 +26,6 @@ docker run -d --name ravendb \
     -e RAVEN_Security_UnsecuredAccessAllowed='PrivateNetwork' \
     --restart=unless-stopped \
     --mount type=bind,src=/mnt/share/RavenDB/data,dst=/opt/RavenDB/Server/RavenData \
-    --mount type=bind,src=/mnt/ravendb/config/settings.json,dst=/opt/RavenDB/settings.json,readonly \
-    --mount type=bind,src=/mnt/ravendb/backup,dst=/opt/RavenDB/Backup \
+    --mount type=bind,src=/mnt/share/RavenDB/config/settings.json,dst=/opt/RavenDB/settings.json,readonly \
+    --mount type=bind,src=/mnt/share/RavenDB/backup,dst=/opt/RavenDB/Backup \
     ravendb/ravendb:4.2-ubuntu-latest
