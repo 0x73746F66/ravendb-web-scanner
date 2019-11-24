@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import requests, logging, colorlog, argparse, retry
+import requests, logging, colorlog, argparse
 import scandir, json, time, re, multiprocessing
 from functools import wraps
 from os import path, getcwd, isatty, makedirs
 from yaml import load
 from datetime import datetime
 from socket import error as SocketError
+from retry import retry
 
 from models import *
 from helpers import *

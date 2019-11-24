@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-import time, argparse, logging, json, urllib3, retry
+import time, argparse, logging, json, urllib3
 from os import path, isatty, getcwd, makedirs
 from datetime import datetime
+from retry import retry
 
 from helpers import *
 from models import *
@@ -9,18 +10,24 @@ from czdap import *
 
 @retry((AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, TimeoutError), tries=15, delay=1.5, backoff=3, logger=logging.getLogger())
 def get_zonefile_previous_line_count(ravendb_key):
+    log = logging.getLogger()
     stored_zonefile = None
     previous_line_count = 0
-    zonefiles_db = get_db('zonefiles')
-    with zonefiles_db.open_session() as session:
-        stored_zonefile = session.load(ravendb_key)
-        if stored_zonefile and hasattr(stored_zonefile, 'line_count') and stored_zonefile.line_count:
-            previous_line_count = stored_zonefile.line_count
+    try:
+        zonefiles_db = get_db('zonefiles')
+        with zonefiles_db.open_session() as session:
+            stored_zonefile = session.load(ravendb_key)
+            if stored_zonefile and hasattr(stored_zonefile, 'line_count') and stored_zonefile.line_count:
+                previous_line_count = stored_zonefile.line_count
+    except Exception as e:
+        log.info(f'Excception for get_zonefile_previous_line_count {e}')
+
     return previous_line_count, stored_zonefile
 
 def main():
     log = logging.getLogger()
     conf = get_config()
+
     zonefile_dir = conf.get('tmp_dir')
     if not path.exists(zonefile_dir):
         makedirs(zonefile_dir)
@@ -50,12 +57,13 @@ def main():
             if download_zonefile:
                 ftp_download(ftp, z.get('file_path'), local_compressed_file)
                 log.info(f'Download {z.get("file_path")} complete')
-                downloaded_at = datetime.utcnow().replace(microsecond=0)
             ftp.quit()
-            if download_zonefile:
+            downloaded_at = datetime.utcnow().replace(microsecond=0)
+            if download_zonefile or conf.get('retry_decompress', False):
                 log.info(f'Decompressing {local_compressed_file}')
                 decompress(local_compressed_file, local_file)
                 decompressed_at = datetime.utcnow().replace(microsecond=0)
+                log.info(f'Decompressed to {local_file}')
 
                 ravendb_key = f'Zonefile/{z.get("tld")}'
                 previous_line_count, _ = get_zonefile_previous_line_count(ravendb_key)
@@ -77,9 +85,13 @@ def main():
                     previous_line_count=previous_line_count,
                     line_count=line_count,
                 )
+                log.info(f'Saving {ravendb_key}')
                 _save(ravendb_key, zonefile)
                 process_files = split_zonefile(zonefile, split_lines=100000)
-                if not process_files:
+                if process_files == []:
+                    log.info('Zonefile .%s unchanged' % zonefile.tld)
+                elif not process_files:
+                    log.error('missing zonefile %s' % zonefile.local_file)
                     continue
                 for zonefile_part_path in process_files:
                     log.info(f'Queuing {zonefile_part_path}')

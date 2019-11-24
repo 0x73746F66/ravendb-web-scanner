@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-WORKDIR=/home/kde/workspace/github/open-net-scans
+WORKDIR=/home/chris/workspace/gitlab/open-net-scans
 CHDIR=src
 SCRIPT=process_ftp.py
 LOGFILE=${WORKDIR}/${CHDIR}/process_ftp.log
 cd ${WORKDIR}
 running=$(pgrep -f ${SCRIPT})
+touch ${LOGFILE}
 if [ -z "${running}" ]; then
     echo '[CRON] Vitrualenv' >> ${LOGFILE}
-    source venv/bin/activate
+    source .env/bin/activate
     cd ${CHDIR}
     echo '[CRON] Running' >> ${LOGFILE}
     ionice -c2 -n7 python ${SCRIPT} -vvvv -l ${LOGFILE} --cron True &

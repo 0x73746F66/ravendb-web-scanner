@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import logging, OpenSSL, socket, ssl, urllib3, retry
+import logging, OpenSSL, socket, ssl, urllib3
 import scandir, dns, dns.resolver, json, time
 
 from os import path, getcwd, isatty, makedirs
@@ -10,6 +10,7 @@ from datetime import datetime
 from pythonwhois import get_whois
 from pythonwhois.shared import WhoisException
 from socket import error as SocketError
+from retry import retry
 
 from helpers import *
 from models import *

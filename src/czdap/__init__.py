@@ -1,7 +1,9 @@
-import logging, requests, json, retry
+import logging, requests, json
 from glob import glob
 from bitmath import Byte
 from os import path
+from retry import retry
+
 try:
     from os import errno
 except:

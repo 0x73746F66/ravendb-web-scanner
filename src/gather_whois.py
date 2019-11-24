@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import os, argparse, logging, shodan, urllib3, multiprocessing, retry
+import os, argparse, logging, shodan, urllib3, multiprocessing
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import *
 from random import randint
+from retry import retry
 
 from helpers import *
 from models import *
 from czdap import *
 from osint import *
 
-@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError, RetryCatcher), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
+@retry((WhoisException, AllTopologyNodesDownException, urllib3.exceptions.ProtocolError, urllib3.exceptions.ConnectionError), tries=5, delay=1.5, backoff=3, logger=logging.getLogger())
 def process_whois(domain: Domain):
     domain_name = domain.fqdn
     log = logging.getLogger()

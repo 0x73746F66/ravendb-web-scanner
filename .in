@@ -21,12 +21,25 @@ if [[ $PATH != *$(npm bin)* ]]; then
   export PATH="$PATH:$(npm bin)"
 fi
 
-if [[ ! -z $(ls venv/bin/activate 2>/dev/null) ]]; then
-  source venv/bin/activate
-fi
-
 git status
 
-#if [[ ! -z $(which pylint) ]]; then
-#  pylint -E --ignore=venv src/**/*.py src/*.py 
-#fi
+VENV=''
+if [[ -d .env ]]; then
+  VENV='.env'
+fi
+if [[ -d .venv ]]; then
+  VENV='.venv'
+fi
+if [[ -d venv ]]; then
+  VENV='venv'
+fi
+if [[ -d ENV ]]; then
+  VENV='ENV'
+fi
+if [[ ! -z "$(ls ${VENV}/bin/activate 2>/dev/null)" ]]; then
+  source $VENV/bin/activate
+fi
+
+if [[ ! -z "$(which pylint)" ]]; then
+  pylint -E --ignore=${VENV} src/**/*.py src/*.py 
+fi

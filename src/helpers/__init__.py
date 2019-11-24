@@ -1,4 +1,4 @@
-import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc, urllib3, retry
+import hashlib, time, requests, logging, colorlog, gzip, shutil, re, mmap, multiprocessing, gc, urllib3
 from os import path, getcwd, isatty
 from functools import wraps
 from yaml import load
@@ -8,6 +8,7 @@ from progressbar import ProgressBar
 from datetime import datetime
 from pyravendb.custom_exceptions.exceptions import AllTopologyNodesDownException
 from socket import error as SocketError
+from retry import retry
 
 from models import *
 
@@ -110,7 +111,7 @@ def splitfile_rounding(split_lines, line_count):
     if line_count == split_lines:
         return split_lines
     return int(line_count / split_lines) * split_lines
-    
+
 def file_line_count(filename, pattern=None):
     lines = 0
     f = open(filename, "r+")
@@ -130,12 +131,10 @@ def file_line_count(filename, pattern=None):
 def split_zonefile(zonefile, split_lines=100000):
     log = logging.getLogger()
     if not path.isfile(zonefile.local_file):
-        log.error('missing zonefile %s' % zonefile.local_file)
-        return
-    
+        return None
+
     if zonefile.line_count == zonefile.previous_line_count:
-        log.info('Zonefile .%s unchanged' % zonefile.tld)
-        return
+        return []
     log.info('Splitting %s' % zonefile.local_file)
     split_files = split_file(zonefile.local_file, lines_per_file=split_lines)
     process_files = []
@@ -359,7 +358,7 @@ def get_file(host, uri='', use_https=True):
         url = 'https://' + path.join(host, uri)
     else:
         url = 'http://' + path.join(host, uri)
-    
+
     url = url.replace(":80/", "/").replace(":443/", "/")
 
     try:
@@ -402,11 +401,11 @@ def file_list_filter(file_list: list, content_type: list = [], file_ext: list = 
         cType = None
         if "Content-Type" in r.headers.keys():
             cType = r.headers["Content-Type"]
-        
+
         if not cType or cType not in content_type:
             log.info(f'skipping {url}, no content_type match')
             continue
-        
+
         if not str(r.status_code).startswith('2'):
             if str(r.status_code).startswith('3'):
                 log.warning("Ignoring %d redirect for URL %s" % (r.status_code, url))

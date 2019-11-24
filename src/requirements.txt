@@ -9,6 +9,6 @@ dnspython
 pythonwhois==2.2.2
 shodan
 scandir
-pyravendb>=4.0.6.1
+pyravendb
 progressbar
 retry

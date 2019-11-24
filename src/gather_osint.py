@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # -*- coding:utf-8
-import os, argparse, logging, shodan, urllib3, multiprocessing, retry
+import os, argparse, logging, shodan, urllib3, multiprocessing
 from datetime import datetime, date, timedelta
 from pyravendb.custom_exceptions.exceptions import *
 from random import randint
+from retry import retry
 
 from helpers import *
 from models import *
